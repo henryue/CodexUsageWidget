@@ -71,10 +71,10 @@ $(TeamIdentifierPrefix)com.henryyue.CodexUsageWidget
 
 ### 常见安装问题
 
-- **Shared usage storage is unavailable：**确认两个 target 选择了同一个签名 Team，然后清理构建文件并重新构建。
-- **Codex was not found：**安装或更新 ChatGPT/Codex、确认已经登录，然后点击 **Re-detect Codex**。
-- **组件列表中找不到：**把已签名的应用移动到 Applications，启动一次，再重新打开组件列表。
-- **数据显示过期：**打开主应用并点击 **Refresh Now**；WidgetKit 可能会延迟桌面重绘。
+- **Shared usage storage is unavailable：** 确认两个 target 选择了同一个签名 Team，然后清理构建文件并重新构建。
+- **Codex was not found：** 安装或更新 ChatGPT/Codex、确认已经登录，然后点击 **Re-detect Codex**。
+- **组件列表中找不到：** 把已签名的应用移动到 Applications，启动一次，再重新打开组件列表。
+- **数据显示过期：** 打开主应用并点击 **Refresh Now**；WidgetKit 可能会延迟桌面重绘。
 
 ## 隐私与安全设计
 
