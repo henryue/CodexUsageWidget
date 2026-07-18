@@ -127,6 +127,8 @@ xcodebuild test \
 
 有关数据处理范围，请参阅 [PRIVACY.md](./PRIVACY.md)；如需负责任地报告安全问题，请参阅 [SECURITY.md](./SECURITY.md)。
 
+当前源码验证的范围和结果记录在 [Docs/VALIDATION.md](./Docs/VALIDATION.md) 中。
+
 ## 卸载
 
 1. 在应用内或 **System Settings › General › Login Items** 中关闭 **Launch at Login**。

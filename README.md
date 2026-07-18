@@ -127,6 +127,8 @@ The optional `CodexUsageSmoke` executable performs a real local initialize/read 
 
 See [PRIVACY.md](./PRIVACY.md) for the data-handling details and [SECURITY.md](./SECURITY.md) for responsible vulnerability reporting.
 
+The scope and results of the current source validation are recorded in [Docs/VALIDATION.md](./Docs/VALIDATION.md).
+
 ## Uninstall
 
 1. Turn off **Launch at Login** in the app or in **System Settings › General › Login Items**.
