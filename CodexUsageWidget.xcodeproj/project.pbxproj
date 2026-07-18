@@ -1,0 +1,228 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {};
+	objectVersion = 56;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		400000000000000000000001 /* CodexUsageWidget.appex in Embed App Extensions */ = {isa = PBXBuildFile; fileRef = 300000000000000000000002 /* CodexUsageWidget.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		400000000000000000000010 /* UsageModels.swift in App */ = {isa = PBXBuildFile; fileRef = 300000000000000000000010 /* UsageModels.swift */; };
+		400000000000000000000011 /* RateLimitsParser.swift in App */ = {isa = PBXBuildFile; fileRef = 300000000000000000000011 /* RateLimitsParser.swift */; };
+		400000000000000000000012 /* ResetTimeFormatter.swift in App */ = {isa = PBXBuildFile; fileRef = 300000000000000000000012 /* ResetTimeFormatter.swift */; };
+		400000000000000000000013 /* SnapshotStore.swift in App */ = {isa = PBXBuildFile; fileRef = 300000000000000000000013 /* SnapshotStore.swift */; };
+		400000000000000000000014 /* ClarityWidgetView.swift in App */ = {isa = PBXBuildFile; fileRef = 300000000000000000000014 /* ClarityWidgetView.swift */; };
+		400000000000000000000015 /* AppInteractionPolicies.swift in App */ = {isa = PBXBuildFile; fileRef = 300000000000000000000015 /* AppInteractionPolicies.swift */; };
+		400000000000000000000020 /* CodexUsageApp.swift in App */ = {isa = PBXBuildFile; fileRef = 300000000000000000000020 /* CodexUsageApp.swift */; };
+		400000000000000000000021 /* DashboardView.swift in App */ = {isa = PBXBuildFile; fileRef = 300000000000000000000021 /* DashboardView.swift */; };
+		400000000000000000000022 /* UsageController.swift in App */ = {isa = PBXBuildFile; fileRef = 300000000000000000000022 /* UsageController.swift */; };
+		400000000000000000000023 /* CodexAppServerClient.swift in App */ = {isa = PBXBuildFile; fileRef = 300000000000000000000023 /* CodexAppServerClient.swift */; };
+		400000000000000000000024 /* AppIcon.icon in Resources */ = {isa = PBXBuildFile; fileRef = 300000000000000000000026 /* AppIcon.icon */; };
+		400000000000000000000110 /* UsageModels.swift in Widget */ = {isa = PBXBuildFile; fileRef = 300000000000000000000010 /* UsageModels.swift */; };
+		400000000000000000000112 /* ResetTimeFormatter.swift in Widget */ = {isa = PBXBuildFile; fileRef = 300000000000000000000012 /* ResetTimeFormatter.swift */; };
+		400000000000000000000113 /* SnapshotStore.swift in Widget */ = {isa = PBXBuildFile; fileRef = 300000000000000000000013 /* SnapshotStore.swift */; };
+		400000000000000000000114 /* ClarityWidgetView.swift in Widget */ = {isa = PBXBuildFile; fileRef = 300000000000000000000014 /* ClarityWidgetView.swift */; };
+		400000000000000000000120 /* CodexUsageWidget.swift in Widget */ = {isa = PBXBuildFile; fileRef = 300000000000000000000030 /* CodexUsageWidget.swift */; };
+		400000000000000000000210 /* UsageModels.swift in Tests */ = {isa = PBXBuildFile; fileRef = 300000000000000000000010 /* UsageModels.swift */; };
+		400000000000000000000211 /* RateLimitsParser.swift in Tests */ = {isa = PBXBuildFile; fileRef = 300000000000000000000011 /* RateLimitsParser.swift */; };
+		400000000000000000000212 /* ResetTimeFormatter.swift in Tests */ = {isa = PBXBuildFile; fileRef = 300000000000000000000012 /* ResetTimeFormatter.swift */; };
+		400000000000000000000213 /* SnapshotStore.swift in Tests */ = {isa = PBXBuildFile; fileRef = 300000000000000000000013 /* SnapshotStore.swift */; };
+		400000000000000000000214 /* CodexAppServerClient.swift in Tests */ = {isa = PBXBuildFile; fileRef = 300000000000000000000023 /* CodexAppServerClient.swift */; };
+		400000000000000000000215 /* AppInteractionPolicies.swift in Tests */ = {isa = PBXBuildFile; fileRef = 300000000000000000000015 /* AppInteractionPolicies.swift */; };
+		400000000000000000000220 /* RateLimitsParserTests.swift in Tests */ = {isa = PBXBuildFile; fileRef = 300000000000000000000040 /* RateLimitsParserTests.swift */; };
+		400000000000000000000221 /* UsageModelsTests.swift in Tests */ = {isa = PBXBuildFile; fileRef = 300000000000000000000041 /* UsageModelsTests.swift */; };
+		400000000000000000000222 /* SnapshotStoreTests.swift in Tests */ = {isa = PBXBuildFile; fileRef = 300000000000000000000042 /* SnapshotStoreTests.swift */; };
+		400000000000000000000223 /* CodexAppServerBrokerTests.swift in Tests */ = {isa = PBXBuildFile; fileRef = 300000000000000000000043 /* CodexAppServerBrokerTests.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		900000000000000000000001 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 000000000000000000000001 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 200000000000000000000002;
+			remoteInfo = CodexUsageWidget;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		500000000000000000000003 /* Embed App Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (400000000000000000000001 /* CodexUsageWidget.appex in Embed App Extensions */, );
+			name = "Embed App Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
+/* Begin PBXFileReference section */
+		300000000000000000000001 /* Codex Usage.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Codex Usage.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+		300000000000000000000002 /* CodexUsageWidget.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = CodexUsageWidget.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		300000000000000000000003 /* CodexUsageTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = CodexUsageTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		300000000000000000000010 /* UsageModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UsageModels.swift; sourceTree = "<group>"; };
+		300000000000000000000011 /* RateLimitsParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RateLimitsParser.swift; sourceTree = "<group>"; };
+		300000000000000000000012 /* ResetTimeFormatter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ResetTimeFormatter.swift; sourceTree = "<group>"; };
+		300000000000000000000013 /* SnapshotStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SnapshotStore.swift; sourceTree = "<group>"; };
+		300000000000000000000014 /* ClarityWidgetView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClarityWidgetView.swift; sourceTree = "<group>"; };
+		300000000000000000000015 /* AppInteractionPolicies.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppInteractionPolicies.swift; sourceTree = "<group>"; };
+		300000000000000000000020 /* CodexUsageApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodexUsageApp.swift; sourceTree = "<group>"; };
+		300000000000000000000021 /* DashboardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DashboardView.swift; sourceTree = "<group>"; };
+		300000000000000000000022 /* UsageController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UsageController.swift; sourceTree = "<group>"; };
+		300000000000000000000023 /* CodexAppServerClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodexAppServerClient.swift; sourceTree = "<group>"; };
+		300000000000000000000024 /* App Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		300000000000000000000025 /* CodexUsage.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = CodexUsage.entitlements; sourceTree = "<group>"; };
+		300000000000000000000026 /* AppIcon.icon */ = {isa = PBXFileReference; lastKnownFileType = folder.iconcomposer.icon; path = IconSource/AppIcon.icon; sourceTree = "<group>"; };
+		300000000000000000000030 /* CodexUsageWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodexUsageWidget.swift; sourceTree = "<group>"; };
+		300000000000000000000031 /* Widget Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		300000000000000000000032 /* CodexUsageWidget.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = CodexUsageWidget.entitlements; sourceTree = "<group>"; };
+		300000000000000000000040 /* RateLimitsParserTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RateLimitsParserTests.swift; sourceTree = "<group>"; };
+		300000000000000000000041 /* UsageModelsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UsageModelsTests.swift; sourceTree = "<group>"; };
+		300000000000000000000042 /* SnapshotStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SnapshotStoreTests.swift; sourceTree = "<group>"; };
+		300000000000000000000043 /* CodexAppServerBrokerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodexAppServerBrokerTests.swift; sourceTree = "<group>"; };
+		300000000000000000000050 /* Package.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Package.swift; sourceTree = "<group>"; };
+		300000000000000000000051 /* README.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = README.md; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		500000000000000000000011 /* Frameworks */ = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+		500000000000000000000021 /* Frameworks */ = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+		500000000000000000000031 /* Frameworks */ = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		100000000000000000000001 = {
+			isa = PBXGroup;
+			children = (
+				100000000000000000000010 /* Shared */,
+				100000000000000000000020 /* App */,
+				100000000000000000000030 /* Widget */,
+				100000000000000000000040 /* Tests */,
+				100000000000000000000041 /* RuntimeTests */,
+				300000000000000000000050 /* Package.swift */,
+				300000000000000000000051 /* README.md */,
+				100000000000000000000002 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		100000000000000000000002 /* Products */ = {isa = PBXGroup; children = (300000000000000000000001, 300000000000000000000002, 300000000000000000000003, ); name = Products; sourceTree = "<group>"; };
+		100000000000000000000010 /* Shared */ = {isa = PBXGroup; children = (300000000000000000000010, 300000000000000000000011, 300000000000000000000012, 300000000000000000000013, 300000000000000000000014, 300000000000000000000015, ); path = Shared; sourceTree = "<group>"; };
+		100000000000000000000020 /* App */ = {isa = PBXGroup; children = (300000000000000000000020, 300000000000000000000021, 300000000000000000000022, 300000000000000000000023, 300000000000000000000024, 300000000000000000000025, 300000000000000000000026, ); path = App; sourceTree = "<group>"; };
+		100000000000000000000030 /* Widget */ = {isa = PBXGroup; children = (300000000000000000000030, 300000000000000000000031, 300000000000000000000032, ); path = Widget; sourceTree = "<group>"; };
+		100000000000000000000040 /* Tests */ = {isa = PBXGroup; children = (300000000000000000000040, 300000000000000000000041, 300000000000000000000042, ); path = Tests; sourceTree = "<group>"; };
+		100000000000000000000041 /* RuntimeTests */ = {isa = PBXGroup; children = (300000000000000000000043, ); path = RuntimeTests; sourceTree = "<group>"; };
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		200000000000000000000001 /* CodexUsage */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 800000000000000000000001;
+			buildPhases = (500000000000000000000010, 500000000000000000000011, 500000000000000000000012, 500000000000000000000003, );
+			buildRules = ();
+			dependencies = (900000000000000000000002, );
+			name = CodexUsage;
+			productName = "Codex Usage";
+			productReference = 300000000000000000000001;
+			productType = "com.apple.product-type.application";
+		};
+		200000000000000000000002 /* CodexUsageWidget */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 800000000000000000000002;
+			buildPhases = (500000000000000000000020, 500000000000000000000021, 500000000000000000000022, );
+			buildRules = ();
+			dependencies = ();
+			name = CodexUsageWidget;
+			productName = CodexUsageWidget;
+			productReference = 300000000000000000000002;
+			productType = "com.apple.product-type.app-extension";
+		};
+		200000000000000000000003 /* CodexUsageTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 800000000000000000000003;
+			buildPhases = (500000000000000000000030, 500000000000000000000031, 500000000000000000000032, );
+			buildRules = ();
+			dependencies = ();
+			name = CodexUsageTests;
+			productName = CodexUsageTests;
+			productReference = 300000000000000000000003;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		000000000000000000000001 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 2660;
+				LastUpgradeCheck = 2660;
+				TargetAttributes = {
+					200000000000000000000001 = {
+						CreatedOnToolsVersion = 26.6;
+						SystemCapabilities = {
+							com.apple.ApplicationGroups.macOS = {
+								enabled = 1;
+							};
+						};
+					};
+					200000000000000000000002 = {
+						CreatedOnToolsVersion = 26.6;
+						SystemCapabilities = {
+							com.apple.ApplicationGroups.macOS = {
+								enabled = 1;
+							};
+						};
+					};
+					200000000000000000000003 = {CreatedOnToolsVersion = 26.6; };
+				};
+			};
+			buildConfigurationList = 800000000000000000000000;
+			compatibilityVersion = "Xcode 14.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (en, Base, );
+			mainGroup = 100000000000000000000001;
+			productRefGroup = 100000000000000000000002;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (200000000000000000000001, 200000000000000000000002, 200000000000000000000003, );
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		500000000000000000000012 /* Resources */ = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (400000000000000000000024 /* AppIcon.icon in Resources */, ); runOnlyForDeploymentPostprocessing = 0; };
+		500000000000000000000022 /* Resources */ = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+		500000000000000000000032 /* Resources */ = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		500000000000000000000010 /* Sources */ = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (400000000000000000000010, 400000000000000000000011, 400000000000000000000012, 400000000000000000000013, 400000000000000000000014, 400000000000000000000015, 400000000000000000000020, 400000000000000000000021, 400000000000000000000022, 400000000000000000000023, ); runOnlyForDeploymentPostprocessing = 0; };
+		500000000000000000000020 /* Sources */ = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (400000000000000000000110, 400000000000000000000112, 400000000000000000000113, 400000000000000000000114, 400000000000000000000120, ); runOnlyForDeploymentPostprocessing = 0; };
+		500000000000000000000030 /* Sources */ = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (400000000000000000000210, 400000000000000000000211, 400000000000000000000212, 400000000000000000000213, 400000000000000000000214, 400000000000000000000215, 400000000000000000000220, 400000000000000000000221, 400000000000000000000222, 400000000000000000000223, ); runOnlyForDeploymentPostprocessing = 0; };
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		900000000000000000000002 /* PBXTargetDependency */ = {isa = PBXTargetDependency; target = 200000000000000000000002 /* CodexUsageWidget */; targetProxy = 900000000000000000000001 /* PBXContainerItemProxy */; };
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		700000000000000000000001 /* Debug */ = {isa = XCBuildConfiguration; buildSettings = {CLANG_ENABLE_MODULES = YES; MACOSX_DEPLOYMENT_TARGET = 14.0; SDKROOT = macosx; SWIFT_STRICT_CONCURRENCY = complete; SWIFT_VERSION = 6.0; }; name = Debug; };
+		700000000000000000000002 /* Release */ = {isa = XCBuildConfiguration; buildSettings = {CLANG_ENABLE_MODULES = YES; MACOSX_DEPLOYMENT_TARGET = 14.0; SDKROOT = macosx; SWIFT_COMPILATION_MODE = wholemodule; SWIFT_STRICT_CONCURRENCY = complete; SWIFT_VERSION = 6.0; }; name = Release; };
+		700000000000000000000011 /* Debug */ = {isa = XCBuildConfiguration; buildSettings = {ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon; CODE_SIGN_ENTITLEMENTS = App/CodexUsage.entitlements; CODE_SIGN_STYLE = Automatic; CURRENT_PROJECT_VERSION = 1; ENABLE_APP_SANDBOX = NO; GENERATE_INFOPLIST_FILE = NO; INFOPLIST_FILE = App/Info.plist; MARKETING_VERSION = 1.0; PRODUCT_BUNDLE_IDENTIFIER = com.henryyue.CodexUsage; PRODUCT_NAME = "Codex Usage"; }; name = Debug; };
+		700000000000000000000012 /* Release */ = {isa = XCBuildConfiguration; buildSettings = {ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon; CODE_SIGN_ENTITLEMENTS = App/CodexUsage.entitlements; CODE_SIGN_STYLE = Automatic; CURRENT_PROJECT_VERSION = 1; ENABLE_APP_SANDBOX = NO; GENERATE_INFOPLIST_FILE = NO; INFOPLIST_FILE = App/Info.plist; MARKETING_VERSION = 1.0; PRODUCT_BUNDLE_IDENTIFIER = com.henryyue.CodexUsage; PRODUCT_NAME = "Codex Usage"; }; name = Release; };
+		700000000000000000000021 /* Debug */ = {isa = XCBuildConfiguration; buildSettings = {APPLICATION_EXTENSION_API_ONLY = YES; CODE_SIGN_ENTITLEMENTS = Widget/CodexUsageWidget.entitlements; CODE_SIGN_STYLE = Automatic; CURRENT_PROJECT_VERSION = 1; ENABLE_APP_SANDBOX = YES; GENERATE_INFOPLIST_FILE = NO; INFOPLIST_FILE = Widget/Info.plist; MARKETING_VERSION = 1.0; PRODUCT_BUNDLE_IDENTIFIER = com.henryyue.CodexUsage.Widget; PRODUCT_NAME = CodexUsageWidget; SKIP_INSTALL = YES; }; name = Debug; };
+		700000000000000000000022 /* Release */ = {isa = XCBuildConfiguration; buildSettings = {APPLICATION_EXTENSION_API_ONLY = YES; CODE_SIGN_ENTITLEMENTS = Widget/CodexUsageWidget.entitlements; CODE_SIGN_STYLE = Automatic; CURRENT_PROJECT_VERSION = 1; ENABLE_APP_SANDBOX = YES; GENERATE_INFOPLIST_FILE = NO; INFOPLIST_FILE = Widget/Info.plist; MARKETING_VERSION = 1.0; PRODUCT_BUNDLE_IDENTIFIER = com.henryyue.CodexUsage.Widget; PRODUCT_NAME = CodexUsageWidget; SKIP_INSTALL = YES; }; name = Release; };
+		700000000000000000000031 /* Debug */ = {isa = XCBuildConfiguration; buildSettings = {BUNDLE_LOADER = ""; CODE_SIGNING_ALLOWED = NO; GENERATE_INFOPLIST_FILE = YES; PRODUCT_BUNDLE_IDENTIFIER = com.henryyue.CodexUsageTests; PRODUCT_NAME = CodexUsageTests; }; name = Debug; };
+		700000000000000000000032 /* Release */ = {isa = XCBuildConfiguration; buildSettings = {BUNDLE_LOADER = ""; CODE_SIGNING_ALLOWED = NO; GENERATE_INFOPLIST_FILE = YES; PRODUCT_BUNDLE_IDENTIFIER = com.henryyue.CodexUsageTests; PRODUCT_NAME = CodexUsageTests; }; name = Release; };
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		800000000000000000000000 /* Project config */ = {isa = XCConfigurationList; buildConfigurations = (700000000000000000000001, 700000000000000000000002, ); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+		800000000000000000000001 /* App config */ = {isa = XCConfigurationList; buildConfigurations = (700000000000000000000011, 700000000000000000000012, ); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+		800000000000000000000002 /* Widget config */ = {isa = XCConfigurationList; buildConfigurations = (700000000000000000000021, 700000000000000000000022, ); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+		800000000000000000000003 /* Tests config */ = {isa = XCConfigurationList; buildConfigurations = (700000000000000000000031, 700000000000000000000032, ); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+/* End XCConfigurationList section */
+	};
+	rootObject = 000000000000000000000001 /* Project object */;
+}

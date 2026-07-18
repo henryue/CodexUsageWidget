@@ -1,0 +1,45 @@
+.DS_Store
+
+# Swift Package Manager and local build products
+.build/
+.build-*/
+.swiftpm/
+build/
+
+# Xcode local state and derived products
+DerivedData/
+.derived-*/
+.review-derived/
+.review-cache/
+.test-matrix-cache/
+.transport-audit-cache/
+*.xcresult
+*.xcarchive
+*.app/
+*.appex/
+*.dSYM/
+*.dmg
+*.pkg
+xcuserdata/
+*.xcuserstate
+
+# Local signing/provisioning material
+*.cer
+*.key
+*.pem
+*.p12
+*.pfx
+*.mobileprovision
+*.provisionprofile
+*.local.xcconfig
+
+# Local secrets and environment overrides
+.env
+.env.*
+!.env.example
+.envrc
+
+# Local runtime snapshots and diagnostic exports
+CodexUsageSnapshot.json
+*.diagnostic.json
+*.protocol-transcript.jsonl
