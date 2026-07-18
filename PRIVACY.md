@@ -13,9 +13,9 @@ The host app reduces the local Codex app-server response to one versioned snapsh
 
 The snapshot is stored in the App Group shared by the signed host app and Widget extension. The app does not maintain a usage-history database.
 
-## Data the app does not read or store
+## Data the app does not persist
 
-The project does not directly read or store account IDs, email addresses, API keys, authentication tokens, browser cookies, Keychain credentials, `~/.codex/auth.json`, or raw app-server JSON. Sanitized diagnostics omit home-directory paths, live percentages, raw protocol messages, and account identifiers.
+The host transiently receives and parses raw JSON lines from the local Codex app-server in memory. The project does not persist, log, or export that raw JSON. It does not directly read or store account IDs, email addresses, API keys, authentication tokens, browser cookies, Keychain credentials, or `~/.codex/auth.json`. Sanitized diagnostics omit home-directory paths, live percentages, raw protocol messages, and account identifiers.
 
 ## Network and process behavior
 

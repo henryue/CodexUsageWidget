@@ -1,6 +1,6 @@
 # Source Validation Record
 
-This record covers source commit `623d5766b0c74b06fc7c82e8c37982a003b27a2a`. The following documentation-only commit adds this record and links to it; it does not change the validated source tree.
+This record covers source commit `623d5766b0c74b06fc7c82e8c37982a003b27a2a`. Subsequent documentation-only commits add and clarify this record; they do not change the validated source tree.
 
 Validation date: 2026-07-18
 
@@ -52,7 +52,7 @@ Result:
 - English and Simplified Chinese README local links resolve.
 - The two README files use one ordinary reciprocal language link at the top; there is no locale-detection script.
 - Preview images contain synthetic data.
-- The public commit chain contains no real Apple Team ID, home-directory path, credential, private key, or live-looking development timestamp found by the release scan.
+- The public commit chain contains no real Apple Team ID, real user home-directory path, credential, private key, or live-looking development timestamp found by the release scan. Synthetic paths such as `/Users/example/...` remain in tests.
 
 ## Release boundary
 
