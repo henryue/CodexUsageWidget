@@ -225,6 +225,100 @@ final class CodexAppServerBrokerTests: XCTestCase {
         await broker.shutdown()
     }
 
+    func testAutomaticReconciliationUpdatesWithoutForegroundOrNotificationsAndStopsWhenPaused() async {
+        let script = FakeScript()
+        let factory = FakeTransportFactory(script: script)
+        let sleeper = ControlledReconciliationSleeper(interval: .seconds(60))
+        let broker = makeBroker(
+            factory: factory,
+            reconciliationInterval: .seconds(60),
+            sleeper: sleeper
+        )
+        let events = LockedEvents()
+        let stream = await broker.events()
+        let eventTask = Task {
+            for await event in stream { events.append(event) }
+        }
+        defer { eventTask.cancel() }
+
+        _ = await broker.resume()
+        let timerWaiting = await waitUntil { sleeper.pendingSleepCount == 1 }
+        XCTAssertTrue(timerWaiting)
+        XCTAssertEqual(script.readCount, 1)
+
+        script.normalUsedPercent = 40
+        XCTAssertTrue(sleeper.releaseNext())
+        let updated = await waitUntil {
+            events.values.contains {
+                guard case .snapshot(let snapshot, reason: .reconciliation) = $0 else { return false }
+                return snapshot.sevenDayWindow?.remainingPercent == 60
+            }
+        }
+        XCTAssertTrue(updated, "A timer alone must publish quota consumed by another session")
+        XCTAssertEqual(script.readCount, 2)
+        XCTAssertEqual(script.initializeCount, 1)
+        XCTAssertEqual(factory.startCount, 1)
+        XCTAssertEqual(factory.maximumActiveCount, 1)
+
+        let nextTimerWaiting = await waitUntil { sleeper.pendingSleepCount == 1 }
+        XCTAssertTrue(nextTimerWaiting)
+        let paused = await broker.suspend()
+        XCTAssertTrue(paused)
+        XCTAssertEqual(sleeper.pendingSleepCount, 0)
+        XCTAssertFalse(sleeper.releaseNext(), "Pausing must cancel the periodic timer")
+        XCTAssertEqual(script.readCount, 2)
+        XCTAssertEqual(factory.activeCount, 0)
+        XCTAssertEqual(factory.stopCount, 1)
+        _ = await broker.shutdown()
+    }
+
+    func testAutomaticReconciliationCoalescesRepeatedTicksWithAnOutstandingRead() async {
+        let script = FakeScript()
+        let factory = FakeTransportFactory(script: script)
+        let sleeper = ControlledReconciliationSleeper(interval: .seconds(60))
+        let broker = makeBroker(
+            factory: factory,
+            readTimeout: .seconds(5),
+            reconciliationInterval: .seconds(60),
+            sleeper: sleeper
+        )
+        _ = await broker.resume()
+        let initialTimerWaiting = await waitUntil { sleeper.pendingSleepCount == 1 }
+        XCTAssertTrue(initialTimerWaiting)
+
+        script.holdReads = true
+        let manual = Task { try await broker.fetchRateLimits() }
+        let readStarted = await waitUntil { script.readCount == 2 }
+        XCTAssertTrue(readStarted)
+
+        XCTAssertTrue(sleeper.releaseNext())
+        let firstTickJoined = await waitForRefreshWaiters(2, broker: broker)
+        XCTAssertTrue(firstTickJoined)
+        let nextTimerWaiting = await waitUntil { sleeper.pendingSleepCount == 1 }
+        XCTAssertTrue(nextTimerWaiting)
+        XCTAssertTrue(sleeper.releaseNext())
+        let secondTickJoined = await waitForRefreshWaiters(3, broker: broker)
+        XCTAssertTrue(secondTickJoined)
+        XCTAssertEqual(script.readCount, 2, "Timer ticks must join the pending RPC rather than start another")
+        XCTAssertEqual(factory.startCount, 1)
+        XCTAssertEqual(factory.maximumActiveCount, 1)
+
+        script.holdReads = false
+        script.releaseHeldReads()
+        switch await manual.result {
+        case .success(let snapshot):
+            XCTAssertEqual(snapshot.sevenDayWindow?.remainingPercent, 73)
+        case .failure(let error):
+            XCTFail("The shared read should complete: \(error)")
+        }
+        let readsCompleted = await waitForRefreshWaiters(0, broker: broker)
+        XCTAssertTrue(readsCompleted)
+        XCTAssertEqual(script.readCount, 2)
+        _ = await broker.shutdown()
+        XCTAssertEqual(sleeper.pendingSleepCount, 0)
+        XCTAssertEqual(factory.stopCount, 1)
+    }
+
     func testNotificationDuringReadSchedulesExactlyOneFollowUpFullRead() async throws {
         let script = FakeScript()
         let factory = FakeTransportFactory(script: script)
@@ -295,7 +389,7 @@ final class CodexAppServerBrokerTests: XCTestCase {
         await broker.shutdown()
     }
 
-    func testTenConsecutiveCrashesOpenCircuitWithoutEleventhLaunch() async {
+    func testTenConsecutiveCrashesStopRapidRetries() async {
         let script = FakeScript()
         script.closeOnRead = true
         let factory = FakeTransportFactory(script: script)
@@ -315,6 +409,96 @@ final class CodexAppServerBrokerTests: XCTestCase {
         let diagnostics = await broker.diagnostics()
         XCTAssertEqual(diagnostics.consecutiveFailures, 10)
         await broker.shutdown()
+    }
+
+    func testTransientFailureRecoversAfterFastRetryBudgetWithoutUserAction() async {
+        let script = FakeScript()
+        script.closeOnRead = true
+        let factory = FakeTransportFactory(script: script)
+        let sleeper = ControlledReconciliationSleeper(interval: .seconds(300))
+        let broker = makeBroker(
+            factory: factory,
+            sleeper: sleeper,
+            retryDelays: [.milliseconds(1)],
+            maximumAutomaticFailures: 3,
+            slowRecoveryInterval: .seconds(300)
+        )
+
+        await broker.resume()
+        let slowRetryScheduled = await waitUntil {
+            factory.startCount == 3 && sleeper.pendingSleepCount == 1
+        }
+        XCTAssertTrue(slowRetryScheduled)
+        XCTAssertEqual(factory.activeCount, 0)
+
+        XCTAssertTrue(sleeper.releaseNext())
+        let stillUsingSlowRetries = await waitUntil {
+            factory.startCount == 4 && sleeper.pendingSleepCount == 1
+        }
+        XCTAssertTrue(stillUsingSlowRetries)
+
+        script.closeOnRead = false
+        XCTAssertTrue(sleeper.releaseNext())
+        let recovered = await waitUntil {
+            factory.startCount == 5 && script.successfulReadCount == 1
+        }
+        XCTAssertTrue(recovered)
+        let counterReset = await waitForConsecutiveFailures(0, broker: broker)
+        XCTAssertTrue(counterReset)
+        XCTAssertEqual(factory.maximumActiveCount, 1)
+        await broker.shutdown()
+    }
+
+    func testSuspendCancelsSlowRecoveryAndResumeCanRetryImmediately() async {
+        let script = FakeScript()
+        script.closeOnRead = true
+        let factory = FakeTransportFactory(script: script)
+        let sleeper = ControlledReconciliationSleeper(interval: .seconds(300))
+        let broker = makeBroker(
+            factory: factory,
+            sleeper: sleeper,
+            maximumAutomaticFailures: 1,
+            slowRecoveryInterval: .seconds(300)
+        )
+
+        await broker.resume()
+        let slowRetryScheduled = await waitUntil { sleeper.pendingSleepCount == 1 }
+        XCTAssertTrue(slowRetryScheduled)
+        await broker.suspend()
+        let cancelled = await waitUntil { sleeper.pendingSleepCount == 0 }
+        XCTAssertTrue(cancelled)
+        XCTAssertFalse(sleeper.releaseNext())
+        XCTAssertEqual(factory.startCount, 1)
+
+        script.closeOnRead = false
+        await broker.resume()
+        XCTAssertEqual(factory.startCount, 2)
+        XCTAssertEqual(script.successfulReadCount, 1)
+        await broker.shutdown()
+    }
+
+    func testShutdownCancelsSlowRecoveryWithoutReplacementProcess() async {
+        let script = FakeScript()
+        script.closeOnRead = true
+        let factory = FakeTransportFactory(script: script)
+        let sleeper = ControlledReconciliationSleeper(interval: .seconds(300))
+        let broker = makeBroker(
+            factory: factory,
+            sleeper: sleeper,
+            maximumAutomaticFailures: 1,
+            slowRecoveryInterval: .seconds(300)
+        )
+
+        await broker.resume()
+        let slowRetryScheduled = await waitUntil { sleeper.pendingSleepCount == 1 }
+        XCTAssertTrue(slowRetryScheduled)
+        let shutdown = await broker.shutdown()
+        XCTAssertTrue(shutdown)
+        let cancelled = await waitUntil { sleeper.pendingSleepCount == 0 }
+        XCTAssertTrue(cancelled)
+        XCTAssertFalse(sleeper.releaseNext())
+        XCTAssertEqual(factory.startCount, 1)
+        XCTAssertEqual(factory.activeCount, 0)
     }
 
     func testSuccessfulRecoveryResetsBackoffCounter() async {
@@ -983,6 +1167,58 @@ final class CodexAppServerBrokerTests: XCTestCase {
         XCTAssertFalse(report.contains("123"))
     }
 
+    func testApplicationDiscoveryFindsCurrentLayoutWithoutCLIInPathAndFallsBackToLegacy() throws {
+        let manager = FileManager.default
+        let root = manager.temporaryDirectory
+            .appendingPathComponent("CodexDiscovery-\(UUID().uuidString)", isDirectory: true)
+        defer { try? manager.removeItem(at: root) }
+        let application = root.appendingPathComponent("Renamed ChatGPT.app", isDirectory: true)
+        let nativeBinary = application.appendingPathComponent(
+            "Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex"
+        )
+        let legacyBinary = application.appendingPathComponent("Contents/Resources/codex")
+        let paths = CodexExecutableResolver.applicationExecutablePaths(at: application)
+
+        for binary in [nativeBinary, legacyBinary] {
+            try manager.createDirectory(at: binary.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try manager.setAttributes([.posixPermissions: 0o755], ofItemAtPath: binary.deletingLastPathComponent().path)
+            try manager.copyItem(atPath: "/usr/bin/true", toPath: binary.path)
+            try manager.setAttributes([.posixPermissions: 0o755], ofItemAtPath: binary.path)
+        }
+
+        // Both layouts may coexist during an update; prefer the current native CLI.
+        XCTAssertEqual(try CodexExecutableResolver.resolveCandidates(paths).get(), nativeBinary)
+        try manager.removeItem(at: legacyBinary)
+        XCTAssertEqual(try CodexExecutableResolver.resolveCandidates(paths).get(), nativeBinary)
+        try manager.copyItem(atPath: "/usr/bin/true", toPath: legacyBinary.path)
+        try manager.setAttributes([.posixPermissions: 0o755], ofItemAtPath: legacyBinary.path)
+        try manager.removeItem(at: nativeBinary)
+        XCTAssertEqual(try CodexExecutableResolver.resolveCandidates(paths).get(), legacyBinary)
+        try manager.removeItem(at: legacyBinary)
+        XCTAssertThrowsError(try CodexExecutableResolver.resolveCandidates(paths).get()) {
+            XCTAssertEqual($0 as? CodexAppServerError, .executableNotFound)
+        }
+    }
+
+    func testApplicationDiscoveryKeepsExecutableSecurityValidation() throws {
+        let manager = FileManager.default
+        let root = manager.temporaryDirectory
+            .appendingPathComponent("CodexDiscovery-\(UUID().uuidString)", isDirectory: true)
+        defer { try? manager.removeItem(at: root) }
+        let application = root.appendingPathComponent("ChatGPT.app", isDirectory: true)
+        let nativeBinary = application.appendingPathComponent(
+            "Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex"
+        )
+        try manager.createDirectory(at: nativeBinary.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try manager.copyItem(atPath: "/usr/bin/true", toPath: nativeBinary.path)
+        try manager.setAttributes([.posixPermissions: 0o777], ofItemAtPath: nativeBinary.path)
+        XCTAssertThrowsError(try CodexExecutableResolver.resolveCandidates(
+            CodexExecutableResolver.applicationExecutablePaths(at: application)
+        ).get()) {
+            XCTAssertEqual($0 as? CodexAppServerError, .executableRejected)
+        }
+    }
+
     func testExecutableValidationRejectsWritableAndGroupPathsWithoutShellParsing() throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("CodexResolver-\(UUID().uuidString)", isDirectory: true)
@@ -1257,6 +1493,37 @@ final class CodexAppServerBrokerTests: XCTestCase {
         XCTAssertTrue(shutdownCompleted)
         XCTAssertEqual(factory.startCount, 1)
         XCTAssertEqual(factory.activeCount, 0)
+    }
+
+    func testDeferredCleanupRecoveryRestoresPeriodicReads() async {
+        let script = FakeScript()
+        let factory = FakeTransportFactory(script: script)
+        factory.stopResults = [false, true]
+        let sleeper = ControlledReconciliationSleeper(interval: .seconds(60))
+        let broker = makeBroker(
+            factory: factory,
+            reconciliationInterval: .seconds(60),
+            sleeper: sleeper
+        )
+
+        await broker.resume()
+        await broker.waitForVersionInspectionForTesting()
+        let initialTimerStarted = await waitUntil { sleeper.pendingSleepCount == 1 }
+        XCTAssertTrue(initialTimerStarted)
+        factory.latestTransport?.finish()
+
+        let reconnected = await waitUntil(timeout: 2) {
+            factory.startCount == 2 && script.successfulReadCount == 2
+        }
+        XCTAssertTrue(reconnected)
+        let timerRestored = await waitUntil { sleeper.pendingSleepCount == 1 }
+        XCTAssertTrue(timerRestored)
+        XCTAssertTrue(sleeper.releaseNext())
+        let reconciled = await waitUntil { script.successfulReadCount == 3 }
+        XCTAssertTrue(reconciled)
+        XCTAssertEqual(factory.startCount, 2)
+        XCTAssertEqual(factory.maximumActiveCount, 1)
+        await broker.shutdown()
     }
 
     func testResumeDrainsCleanupPendingBeforeStartingReplacementTransport() async throws {
@@ -1721,8 +1988,11 @@ final class CodexAppServerBrokerTests: XCTestCase {
         initializeTimeout: Duration = .seconds(1),
         notificationDebounce: Duration = .milliseconds(5),
         readTimeout: Duration = .seconds(1),
+        reconciliationInterval: Duration = .seconds(3_600),
+        sleeper: any BrokerSleeper = ContinuousBrokerSleeper(),
         retryDelays: [Duration] = [.milliseconds(5)],
         maximumAutomaticFailures: Int = 10,
+        slowRecoveryInterval: Duration = .seconds(300),
         versionInspectionHandlerDelayForTesting: Duration = .zero,
         suppressSynchronousVersionExitObservationForTesting: Bool = false,
         teardownRaceHooksForTesting: BrokerTeardownRaceHooks? = nil
@@ -1733,10 +2003,12 @@ final class CodexAppServerBrokerTests: XCTestCase {
                 initializeTimeout: initializeTimeout,
                 readTimeout: readTimeout,
                 notificationDebounce: notificationDebounce,
-                reconciliationInterval: .seconds(3_600),
+                reconciliationInterval: reconciliationInterval,
                 retryDelays: retryDelays,
-                maximumAutomaticFailures: maximumAutomaticFailures
+                maximumAutomaticFailures: maximumAutomaticFailures,
+                slowRecoveryInterval: slowRecoveryInterval
             ),
+            sleeper: sleeper,
             jitter: { $0 },
             versionInspectionHandlerDelayForTesting: versionInspectionHandlerDelayForTesting,
             suppressSynchronousVersionExitObservationForTesting:
@@ -1856,6 +2128,63 @@ final class CodexAppServerBrokerTests: XCTestCase {
     }
 }
 
+/// Only reconciliation sleeps are manually advanced; RPC deadlines still use
+/// the real clock. This exercises the broker's production timer loop without
+/// waiting a minute or allowing timing-dependent extra polling in the tests.
+private final class ControlledReconciliationSleeper: BrokerSleeper, @unchecked Sendable {
+    private let lock = NSLock()
+    private let interval: Duration
+    private var waits: [(UUID, CheckedContinuation<Void, Error>)] = []
+    private var cancelledIDs = Set<UUID>()
+
+    init(interval: Duration) { self.interval = interval }
+
+    var pendingSleepCount: Int { lock.withLock { waits.count } }
+
+    func sleep(for duration: Duration) async throws {
+        guard duration == interval else {
+            try await Task.sleep(for: duration)
+            return
+        }
+        let id = UUID()
+        defer { _ = lock.withLock { cancelledIDs.remove(id) } }
+        try Task.checkCancellation()
+        try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                let cancelled = lock.withLock {
+                    guard !Task.isCancelled, !cancelledIDs.contains(id) else { return true }
+                    waits.append((id, continuation))
+                    return false
+                }
+                if cancelled { continuation.resume(throwing: CancellationError()) }
+            }
+        } onCancel: {
+            self.cancel(id)
+        }
+    }
+
+    func releaseNext() -> Bool {
+        let continuation = lock.withLock { () -> CheckedContinuation<Void, Error>? in
+            guard !waits.isEmpty else { return nil }
+            return waits.removeFirst().1
+        }
+        guard let continuation else { return false }
+        continuation.resume()
+        return true
+    }
+
+    private func cancel(_ id: UUID) {
+        let continuation = lock.withLock { () -> CheckedContinuation<Void, Error>? in
+            guard let index = waits.firstIndex(where: { $0.0 == id }) else {
+                cancelledIDs.insert(id)
+                return nil
+            }
+            return waits.remove(at: index).1
+        }
+        continuation?.resume(throwing: CancellationError())
+    }
+}
+
 private final class FakeScript: @unchecked Sendable {
     enum ReadFixture: Sendable { case normal, invalidSibling, sameDurationCollision }
     private struct TranscriptRecord: Sendable {
@@ -1881,6 +2210,7 @@ private final class FakeScript: @unchecked Sendable {
     private var _initializedNotificationCount = 0
     private var _handshakeViolationCount = 0
     private var _readFixture = ReadFixture.normal
+    private var _normalUsedPercent = 27
 
     var readCount: Int { lock.withLock { _readCount } }
     var successfulReadCount: Int { lock.withLock { _successfulReadCount } }
@@ -1890,6 +2220,10 @@ private final class FakeScript: @unchecked Sendable {
     var readFixture: ReadFixture {
         get { lock.withLock { _readFixture } }
         set { lock.withLock { _readFixture = newValue } }
+    }
+    var normalUsedPercent: Int {
+        get { lock.withLock { _normalUsedPercent } }
+        set { lock.withLock { _normalUsedPercent = newValue } }
     }
     var holdReads: Bool {
         get { lock.withLock { _holdReads } }
@@ -2088,13 +2422,13 @@ private final class FakeScript: @unchecked Sendable {
         case .malformed:
             transport.yield(Data("not-json".utf8))
         case .success:
-            let fixture = lock.withLock { _readFixture }
+            let (fixture, normalUsedPercent) = lock.withLock { (_readFixture, _normalUsedPercent) }
             let primary: [String: Any]
             let secondary: Any
             switch fixture {
             case .normal:
                 primary = [
-                    "usedPercent": 27,
+                    "usedPercent": normalUsedPercent,
                     "windowDurationMins": 10_080,
                     "resetsAt": 1_900_000_000
                 ]

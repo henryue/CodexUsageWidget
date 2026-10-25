@@ -1,6 +1,8 @@
 import AppKit
 import Combine
 import Foundation
+import Network
+import OSLog
 import ServiceManagement
 import WidgetKit
 
@@ -55,6 +57,13 @@ final class UsageController: ObservableObject {
     private var activeFetchTask: Task<Void, Never>?
     private var brokerEventTask: Task<Void, Never>?
     private var redetectObservationTask: Task<Void, Never>?
+    private var wakeObservers: Set<AnyCancellable> = []
+    private var widgetReloadGate = WidgetReloadGate()
+    private var forceNextWidgetReload = false
+    private var lastActivationRefreshAt: Date?
+    private let networkMonitor = NWPathMonitor()
+    private var networkWasUnavailable = false
+    private static let logger = Logger(subsystem: "com.henryyue.CodexUsage", category: "refresh")
     private static let updatesPausedKey = "codexUsage.automaticUpdatesPaused"
 
     init(
@@ -99,6 +108,24 @@ final class UsageController: ObservableObject {
             persistPausedState()
         }
 
+        NSWorkspace.shared.notificationCenter.publisher(for: NSWorkspace.didWakeNotification)
+            .merge(with: NSWorkspace.shared.notificationCenter.publisher(for: NSWorkspace.screensDidWakeNotification))
+            .sink { [weak self] _ in
+                Task { @MainActor [weak self] in self?.refreshWhenActive() }
+            }
+            .store(in: &wakeObservers)
+
+        networkMonitor.pathUpdateHandler = { [weak self] path in
+            let isAvailable = path.status == .satisfied
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                let recovered = self.networkWasUnavailable && isAvailable
+                self.networkWasUnavailable = !isAvailable
+                if recovered { self.refreshWhenActive() }
+            }
+        }
+        networkMonitor.start(queue: DispatchQueue(label: "com.henryyue.CodexUsage.network"))
+
         brokerEventTask = Task { [weak self, client] in
             let events = await client.events()
             guard let self, !Task.isCancelled else { return }
@@ -111,12 +138,19 @@ final class UsageController: ObservableObject {
     }
 
     deinit {
+        networkMonitor.cancel()
         activeFetchTask?.cancel()
         brokerEventTask?.cancel()
         redetectObservationTask?.cancel()
     }
 
     func refreshNow() {
+        startRefresh(forceWidgetReload: true)
+    }
+
+    private func startRefresh(forceWidgetReload: Bool) {
+        // A user action joining an existing fetch must still refresh the widget.
+        forceNextWidgetReload = forceNextWidgetReload || forceWidgetReload
         guard activeFetchTask == nil else { return }
         activeFetchTask = Task { [weak self] in
             await self?.refreshAndWait()
@@ -125,12 +159,20 @@ final class UsageController: ObservableObject {
 
     func refreshWhenActive() {
         loginItemCoordinator.refresh()
-        guard !isRefreshing, !updatesPaused else { return }
+        guard !updatesPaused else { return }
+        let now = Date.now
+        // Wake, scene activation and menu presentation can arrive together.
+        if let previous = lastActivationRefreshAt,
+           now >= previous, now.timeIntervalSince(previous) < 5 { return }
+        lastActivationRefreshAt = now
         if case .available(let snapshot) = state,
-           Date.now.timeIntervalSince(snapshot.fetchedAt) < 60 {
+           now >= snapshot.fetchedAt,
+           now.timeIntervalSince(snapshot.fetchedAt) < 30 {
+            let current = store.loadResult()
+            reloadWidgetIfNeeded(previous: current, current: current, at: now, force: true)
             return
         }
-        refreshNow()
+        startRefresh(forceWidgetReload: true)
     }
 
     func pauseAutomaticUpdates() {
@@ -148,6 +190,7 @@ final class UsageController: ObservableObject {
     }
 
     func redetectCodex() {
+        forceNextWidgetReload = false
         activeFetchTask?.cancel()
         automaticUpdatesCoordinator.redetect()
         redetectObservationTask?.cancel()
@@ -160,6 +203,8 @@ final class UsageController: ObservableObject {
 
     @discardableResult
     func shutdown() async -> Bool {
+        networkMonitor.cancel()
+        wakeObservers.removeAll()
         let eventTask = brokerEventTask
         eventTask?.cancel()
         brokerEventTask = nil
@@ -199,6 +244,7 @@ final class UsageController: ObservableObject {
         guard !isRefreshing else { return }
         isRefreshing = true
         defer {
+            forceNextWidgetReload = false
             isRefreshing = false
             activeFetchTask = nil
         }
@@ -206,8 +252,10 @@ final class UsageController: ObservableObject {
         let attemptDate = Date.now
         do {
             let snapshot = try await client.fetchRateLimits(now: attemptDate)
-            applySuccessfulSnapshot(snapshot)
             brokerDiagnostics = await client.diagnostics()
+            // Publish last, without another suspension that could swallow a
+            // user refresh joining this task just before its defer runs.
+            applySuccessfulSnapshot(snapshot)
         } catch is CancellationError {
             return
         } catch {
@@ -269,6 +317,9 @@ final class UsageController: ObservableObject {
         if !publicationFailed {
             state = UsageViewState.resolve(envelope: envelope, at: .now)
             lastError = nil
+            if previous != envelope {
+                Self.logger.info("Published a successful usage snapshot")
+            }
         }
         reloadWidgetIfNeeded(
             previous: previousLoadResult,
@@ -306,6 +357,7 @@ final class UsageController: ObservableObject {
             : envelope
         state = UsageViewState.resolve(envelope: presentedEnvelope, at: attemptDate)
         lastError = presentedMessage
+        Self.logger.info("Usage refresh failed; retaining the last successful snapshot")
         reloadWidgetIfNeeded(
             previous: previousLoadResult,
             current: currentLoadResult,
@@ -377,13 +429,18 @@ final class UsageController: ObservableObject {
     private func reloadWidgetIfNeeded(
         previous: SnapshotStoreLoadResult,
         current: SnapshotStoreLoadResult,
-        at date: Date
+        at date: Date,
+        force explicitForce: Bool = false
     ) {
-        guard WidgetReloadPolicy.visibleStateChanged(
+        let force = explicitForce || forceNextWidgetReload
+        forceNextWidgetReload = false
+        guard widgetReloadGate.shouldRequestReload(
             previous: previous,
             current: current,
-            at: date
+            at: date,
+            force: force
         ) else { return }
+        Self.logger.info("Requesting widget timeline reload; user or activation request: \(force)")
         WidgetCenter.shared.reloadTimelines(ofKind: "CodexUsageWidget")
     }
 

@@ -6,12 +6,12 @@ struct DashboardView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 24) {
+            VStack(alignment: .leading, spacing: 18) {
                 header
                 liveStatus
-                privacyNote
-                launchAtLoginSettings
-                diagnostics
+                backgroundSettings
+                connectionDetails
+                privacyDetails
 
 #if DEBUG
                 Divider()
@@ -19,232 +19,441 @@ struct DashboardView: View {
 #endif
             }
             .padding(24)
+            .frame(maxWidth: 740)
+            .frame(maxWidth: .infinity)
         }
         .background(Color(nsColor: .windowBackgroundColor))
         .navigationTitle("Codex Usage")
+        .toolbar {
+            ToolbarItemGroup(placement: .primaryAction) {
+                Button {
+                    controller.refreshNow()
+                } label: {
+                    Label("Refresh", systemImage: "arrow.clockwise")
+                }
+                .disabled(controller.isRefreshing || controller.updatesPaused)
+                .keyboardShortcut("r", modifiers: .command)
+                .help("Refresh usage from the local Codex service")
+                .accessibilityHint("Requests the latest usage from the local Codex app-server")
+
+                Menu {
+                    Button(
+                        controller.updatesPaused ? "Resume Automatic Updates" : "Pause Automatic Updates",
+                        systemImage: controller.updatesPaused ? "play.fill" : "pause.fill"
+                    ) {
+                        setAutomaticUpdates(enabled: controller.updatesPaused)
+                    }
+                    Divider()
+                    Button("Re-detect Codex", systemImage: "arrow.triangle.2.circlepath") {
+                        controller.redetectCodex()
+                    }
+                    .disabled(controller.updatesPaused)
+                    Button("Copy Sanitized Diagnostic", systemImage: "doc.on.doc") {
+                        controller.copySanitizedDiagnostic()
+                    }
+                    Divider()
+                    Button("Quit Codex Usage", systemImage: "power") {
+                        NSApplication.shared.terminate(nil)
+                    }
+                } label: {
+                    Label("More", systemImage: "ellipsis.circle")
+                }
+                .help("More options")
+                .accessibilityLabel("More options")
+            }
+        }
     }
 
     private var header: some View {
-        HStack(alignment: .firstTextBaseline) {
-            VStack(alignment: .leading, spacing: 5) {
-                Text("Codex usage")
-                    .font(.largeTitle)
+        HStack(alignment: .center, spacing: 12) {
+            Image(systemName: "chart.bar.xaxis")
+                .font(.system(size: 21, weight: .medium))
+                .foregroundStyle(.tint)
+                .frame(width: 44, height: 44)
+                .background(Color.accentColor.opacity(0.10), in: RoundedRectangle(cornerRadius: 12))
+                .accessibilityHidden(true)
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text("Your Codex usage")
+                    .font(.title2)
                     .fontWeight(.semibold)
-                Text("Local account limits, refreshed conservatively")
+                Text("Account limits at a glance")
+                    .font(.subheadline)
                     .foregroundStyle(.secondary)
             }
             Spacer()
-            Button {
-                controller.refreshNow()
-            } label: {
-                Label("Refresh Now", systemImage: "arrow.clockwise")
+            if controller.isRefreshing {
+                ProgressView()
+                    .controlSize(.small)
+                    .accessibilityLabel("Refreshing usage")
             }
-            .buttonStyle(.borderedProminent)
-            .disabled(controller.isRefreshing || controller.updatesPaused)
-            .accessibilityHint("Requests the latest usage from the local Codex app-server")
-
-            Menu {
-                if controller.updatesPaused {
-                    Button("Resume Automatic Updates", systemImage: "play.fill") {
-                        controller.resumeAutomaticUpdates()
-                    }
-                } else {
-                    Button("Stop Automatic Updates", systemImage: "pause.fill") {
-                        controller.pauseAutomaticUpdates()
-                    }
-                }
-                Divider()
-                Button("Quit Codex Usage", systemImage: "power") {
-                    NSApplication.shared.terminate(nil)
-                }
-            } label: {
-                Image(systemName: "ellipsis.circle")
-            }
-            .menuStyle(.borderlessButton)
-            .accessibilityLabel("More options")
         }
+        .padding(.bottom, 2)
     }
 
     @ViewBuilder
     private var liveStatus: some View {
-        GroupBox("Current status") {
-            VStack(alignment: .leading, spacing: 14) {
-                if controller.isRefreshing {
-                    HStack {
-                        ProgressView()
-                            .controlSize(.small)
-                        Text("Refreshing from the local Codex service…")
-                    }
-                }
-
-                if controller.updatesPaused {
-                    Label("Automatic updates are paused. Resume updates to refresh.", systemImage: "pause.circle")
+        VStack(alignment: .leading, spacing: 12) {
+            if controller.updatesPaused {
+                HStack(spacing: 10) {
+                    Image(systemName: "pause.circle.fill")
                         .foregroundStyle(.orange)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Automatic updates paused")
+                            .font(.subheadline)
+                            .fontWeight(.medium)
+                        Text("Resume to get the latest usage.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Button("Resume") {
+                        controller.resumeAutomaticUpdates()
+                    }
+                    .buttonStyle(.bordered)
+                }
+                .padding(14)
+                .background(Color.orange.opacity(0.08), in: RoundedRectangle(cornerRadius: 14))
+            }
+
+            switch controller.state {
+            case .loading:
+                statusCard(
+                    symbol: "arrow.triangle.2.circlepath",
+                    title: "Waiting for usage",
+                    message: controller.updatesPaused
+                        ? "Resume automatic updates to request your account limits."
+                        : "Connecting to the local Codex service. Your usage will appear here after the first refresh.",
+                    allowsRetry: false
+                )
+            case .unauthenticated(let message):
+                statusCard(
+                    symbol: "person.crop.circle.badge.exclamationmark",
+                    title: "Sign in required",
+                    message: message,
+                    allowsRetry: true
+                )
+            case .failed(let message):
+                statusCard(
+                    symbol: "exclamationmark.triangle",
+                    title: "Usage unavailable",
+                    message: message,
+                    allowsRetry: true
+                )
+            case .available(let snapshot):
+                snapshotCard(snapshot, stale: false, message: nil)
+            case .stale(let snapshot, let message):
+                snapshotCard(snapshot, stale: true, message: message)
+            }
+        }
+    }
+
+    private func snapshotCard(_ snapshot: UsageSnapshot, stale: Bool, message: String?) -> some View {
+        DashboardCard {
+            VStack(alignment: .leading, spacing: 22) {
+                HStack {
+                    statusBadge(
+                        title: controller.updatesPaused ? "Paused" : (stale ? "Last successful data" : "Up to date"),
+                        symbol: controller.updatesPaused ? "pause.fill" : (stale ? "clock.badge.exclamationmark" : "checkmark.circle.fill"),
+                        color: controller.updatesPaused || stale ? .orange : .green
+                    )
+                    Spacer()
+                    HStack(spacing: 4) {
+                        Text("Updated")
+                        Text(snapshot.fetchedAt, style: .relative)
+                    }
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .help(snapshot.fetchedAt.formatted(date: .abbreviated, time: .shortened))
                 }
 
-                switch controller.state {
-                case .loading:
-                    statusMessage(
-                        symbol: "arrow.triangle.2.circlepath",
-                        title: "Waiting for the first refresh",
-                        message: "Codex Usage will keep the last successful snapshot for the widget."
-                    )
-                case .unauthenticated(let message):
-                    statusMessage(symbol: "person.crop.circle.badge.exclamationmark", title: "Sign in required", message: message)
-                case .failed(let message):
-                    statusMessage(symbol: "exclamationmark.triangle", title: "Usage unavailable", message: message)
-                case .available(let snapshot):
-                    snapshotRows(snapshot, stale: false)
-                case .stale(let snapshot, let message):
-                    snapshotRows(snapshot, stale: true)
-                    if let message {
+                if let limiting = snapshot.limitingWindow {
+                    VStack(alignment: .leading, spacing: 16) {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("\(limiting.detailLabel) limit")
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                            HStack(alignment: .firstTextBaseline, spacing: 10) {
+                                Text("\(limiting.roundedRemainingPercent)%")
+                                    .font(.system(size: 64, weight: .semibold))
+                                    .tracking(-2)
+                                    .monospacedDigit()
+                                Text("remaining")
+                                    .font(.title3)
+                                    .foregroundStyle(.secondary)
+                            }
+                            .accessibilityElement(children: .combine)
+                        }
+
+                        ProgressView(value: limiting.remainingPercent, total: 100)
+                            .tint(.accentColor)
+                            .accessibilityLabel("\(limiting.detailLabel) usage remaining")
+                            .accessibilityValue("\(limiting.roundedRemainingPercent) percent")
+
+                        resetSummary(limiting)
+                    }
+
+                    if snapshot.windows.count > 1 {
+                        Divider()
+                        VStack(spacing: 16) {
+                            ForEach(Array(snapshot.strictnessSortedWindows.dropFirst())) { window in
+                                additionalWindowRow(window)
+                            }
+                        }
+                    }
+                } else {
+                    Text("No usage limits are available in this snapshot.")
+                        .foregroundStyle(.secondary)
+                }
+
+                if stale, !controller.updatesPaused, let message {
+                    HStack(alignment: .top, spacing: 8) {
+                        Image(systemName: "exclamationmark.circle")
+                            .foregroundStyle(.orange)
                         Text(message)
-                            .font(.caption)
                             .foregroundStyle(.secondary)
                             .textSelection(.enabled)
                     }
+                    .font(.caption)
                 }
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.vertical, 4)
         }
     }
 
-    private func snapshotRows(_ snapshot: UsageSnapshot, stale: Bool) -> some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack {
-                Label(
-                    stale ? "Last successful data" : "Up to date",
-                    systemImage: stale ? "clock.badge.exclamationmark" : "checkmark.circle.fill"
-                )
-                .foregroundStyle(stale ? Color.orange : Color.green)
+    private func additionalWindowRow(_ window: UsageWindow) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .firstTextBaseline) {
+                Text("\(window.detailLabel) limit")
+                    .font(.subheadline)
                 Spacer()
-                Text(snapshot.fetchedAt, style: .relative)
-                    .foregroundStyle(.secondary)
+                Text("\(window.roundedRemainingPercent)% remaining")
+                    .font(.subheadline)
+                    .fontWeight(.medium)
+                    .monospacedDigit()
             }
+            ProgressView(value: window.remainingPercent, total: 100)
+                .tint(.accentColor)
+            resetSummary(window)
+        }
+    }
 
-            ForEach(snapshot.mediumDisplayWindows) { window in
-                VStack(spacing: 7) {
-                    LabeledContent("\(window.detailLabel) limit") {
-                        Text("\(window.roundedRemainingPercent)% remaining")
-                            .monospacedDigit()
+    private func resetSummary(_ window: UsageWindow) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: "clock")
+            if let resetsAt = window.resetsAt {
+                if resetsAt <= .now {
+                    Text("Reset time passed · Pending refresh")
+                } else {
+                    Text("Resets in")
+                    Text(resetsAt, style: .relative)
+                        .monospacedDigit()
+                        .help(resetsAt.formatted(date: .abbreviated, time: .shortened))
+                }
+            } else {
+                Text("Reset time unavailable")
+            }
+        }
+        .font(.caption)
+        .foregroundStyle(.secondary)
+        .accessibilityElement(children: .combine)
+    }
+
+    private func statusBadge(title: String, symbol: String, color: Color) -> some View {
+        Label(title, systemImage: symbol)
+            .font(.caption)
+            .fontWeight(.medium)
+            .foregroundStyle(color)
+            .padding(.horizontal, 9)
+            .padding(.vertical, 5)
+            .background(color.opacity(0.10), in: Capsule())
+    }
+
+    private func statusCard(symbol: String, title: String, message: String, allowsRetry: Bool) -> some View {
+        DashboardCard {
+            VStack(alignment: .leading, spacing: 18) {
+                HStack(alignment: .top, spacing: 14) {
+                    Image(systemName: symbol)
+                        .font(.system(size: 28, weight: .regular))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 36)
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(title)
+                            .font(.title3)
+                            .fontWeight(.semibold)
+                        Text(message)
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .textSelection(.enabled)
                     }
-                    ProgressView(value: window.remainingPercent, total: 100)
-                        .tint(.accentColor)
-                    LabeledContent("Resets") {
-                        if let resetsAt = window.resetsAt {
-                            if resetsAt <= .now {
-                                Text("Pending refresh")
-                            } else {
-                                Text(resetsAt, style: .relative)
-                                    .monospacedDigit()
-                            }
-                        } else {
-                            Text("Unavailable")
-                        }
+                }
+                if allowsRetry {
+                    Button("Refresh Now", systemImage: "arrow.clockwise") {
+                        controller.refreshNow()
                     }
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .buttonStyle(.bordered)
+                    .disabled(controller.isRefreshing || controller.updatesPaused)
                 }
             }
-        }
-    }
-
-    private func statusMessage(symbol: String, title: String, message: String) -> some View {
-        HStack(alignment: .top, spacing: 12) {
-            Image(systemName: symbol)
-                .font(.title2)
-                .foregroundStyle(.secondary)
-            VStack(alignment: .leading, spacing: 4) {
-                Text(title).font(.headline)
-                Text(message)
-                    .foregroundStyle(.secondary)
-                    .textSelection(.enabled)
-            }
-        }
-    }
-
-    private var privacyNote: some View {
-        GroupBox("Privacy and refresh behavior") {
-            VStack(alignment: .leading, spacing: 8) {
-                Label("Reads only the sanitized rate-limit response from the local Codex app-server.", systemImage: "lock.shield")
-                Label("Does not read auth.json, scrape a webpage, or add telemetry.", systemImage: "hand.raised")
-                Label("Refreshes on launch, when returning to the foreground, and about every 15 minutes while running.", systemImage: "clock")
-                Text("WidgetKit controls the final desktop update schedule, so the widget is intentionally not described as second-by-second realtime.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.vertical, 4)
+            .padding(.vertical, 10)
         }
     }
 
-    private var launchAtLoginSettings: some View {
-        GroupBox("Startup") {
-            VStack(alignment: .leading, spacing: 8) {
-                Toggle(
-                    "Launch at Login",
-                    isOn: Binding(
+    private var backgroundSettings: some View {
+        DashboardCard {
+            VStack(alignment: .leading, spacing: 14) {
+                Label("Background & startup", systemImage: "switch.2")
+                    .font(.headline)
+
+                HStack {
+                    Text("Automatic updates")
+                        .accessibilityHidden(true)
+                    Spacer()
+                    Toggle("Automatic updates", isOn: Binding(
+                        get: { !controller.updatesPaused },
+                        set: { setAutomaticUpdates(enabled: $0) }
+                    ))
+                    .labelsHidden()
+                    .toggleStyle(.switch)
+                    .accessibilityLabel("Automatic updates")
+                }
+
+                HStack {
+                    Text("Launch at Login")
+                        .accessibilityHidden(true)
+                    Spacer()
+                    Toggle("Launch at Login", isOn: Binding(
                         get: { controller.launchAtLoginEnabled },
                         set: { controller.setLaunchAtLogin(enabled: $0) }
-                    )
-                )
-                Text("Off by default. Enabling it registers this app as a system login item so updates can resume after you sign in to your Mac.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                    ))
+                    .labelsHidden()
+                    .toggleStyle(.switch)
+                    .accessibilityLabel("Launch at Login")
+                }
 
                 if controller.launchAtLoginRequiresApproval {
-                    Label("Approval is required in System Settings.", systemImage: "exclamationmark.circle")
+                    Label("Approve the login item in System Settings.", systemImage: "exclamationmark.circle")
+                        .font(.caption)
                         .foregroundStyle(.orange)
                 }
                 if let message = controller.launchAtLoginMessage {
                     Text(message)
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                        .textSelection(.enabled)
                 }
                 if controller.launchAtLoginRequiresApproval || controller.launchAtLoginMessage != nil {
                     Button("Open Login Items Settings") {
                         controller.openLoginItemsSettings()
                     }
                 }
+
+                Divider()
+                Label {
+                    Text("Close this window to keep running in the menu bar. Use its icon to reopen the dashboard or quit.")
+                        .fixedSize(horizontal: false, vertical: true)
+                } icon: {
+                    Image(systemName: "menubar.rectangle")
+                }
+                .font(.caption)
+                .foregroundStyle(.secondary)
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.vertical, 4)
         }
     }
 
-    private var diagnostics: some View {
-        GroupBox("Codex connection") {
-            VStack(alignment: .leading, spacing: 8) {
-                LabeledContent("Executable") {
-                    Text(controller.brokerDiagnostics.executablePath ?? "Not detected")
-                        .font(.system(.caption, design: .monospaced))
-                        .textSelection(.enabled)
-                }
-                LabeledContent("Version") {
-                    Text(controller.brokerDiagnostics.executableVersion ?? "Unavailable")
-                        .textSelection(.enabled)
-                }
-                LabeledContent("Connection") {
-                    Text(controller.brokerDiagnostics.processIdentifier == nil ? "Stopped" : "Running")
-                }
-                if controller.brokerDiagnostics.consecutiveFailures > 0 {
-                    LabeledContent("Consecutive failures") {
-                        Text("\(controller.brokerDiagnostics.consecutiveFailures)")
-                            .monospacedDigit()
+    private var connectionDetails: some View {
+        DashboardCard {
+            DisclosureGroup {
+                VStack(alignment: .leading, spacing: 12) {
+                    Divider()
+                    LabeledContent("Version") {
+                        Text(controller.brokerDiagnostics.executableVersion ?? "Unavailable")
+                            .textSelection(.enabled)
                     }
+                    LabeledContent("Service") {
+                        Text(controller.brokerDiagnostics.processIdentifier == nil ? "Stopped" : "Running")
+                    }
+                    if controller.brokerDiagnostics.consecutiveFailures > 0 {
+                        LabeledContent("Consecutive failures") {
+                            Text("\(controller.brokerDiagnostics.consecutiveFailures)")
+                                .monospacedDigit()
+                        }
+                    }
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Executable")
+                            .foregroundStyle(.secondary)
+                        Text(controller.brokerDiagnostics.executablePath ?? "Not detected")
+                            .font(.system(.caption, design: .monospaced))
+                            .fixedSize(horizontal: false, vertical: true)
+                            .textSelection(.enabled)
+                    }
+                    HStack {
+                        Button("Re-detect Codex") {
+                            controller.redetectCodex()
+                        }
+                        .disabled(controller.updatesPaused)
+                        Button("Copy Sanitized Diagnostic") {
+                            controller.copySanitizedDiagnostic()
+                        }
+                    }
+                    .buttonStyle(.bordered)
                 }
-                Button("Re-detect Codex") {
-                    controller.redetectCodex()
-                }
-                .disabled(controller.updatesPaused)
-                Button("Copy Sanitized Diagnostic") {
-                    controller.copySanitizedDiagnostic()
+                .font(.subheadline)
+                .padding(.top, 8)
+            } label: {
+                HStack {
+                    Label("Connection details", systemImage: "network")
+                        .font(.headline)
+                    Spacer()
+                    Text(controller.updatesPaused ? "Paused" : (controller.brokerDiagnostics.processIdentifier == nil ? "Not connected" : "Running"))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.vertical, 4)
         }
+    }
+
+    private var privacyDetails: some View {
+        DisclosureGroup {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Reads only the sanitized rate-limit response from the local Codex app-server. It does not read auth.json, scrape a webpage, or add telemetry.")
+                Text("Checks usage about every 30 seconds while running. Opening the dashboard or menu, waking your Mac, or reconnecting to the network also checks for updates. Temporary connection failures retry automatically, slowing to about every 5 minutes after repeated failures.")
+                Text("Usage changes request a widget update right away. Unchanged readings are combined to reduce unnecessary refreshes; macOS controls when the desktop widget redraws.")
+            }
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(.top, 8)
+        } label: {
+            Label("Privacy & refresh behavior", systemImage: "lock.shield")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .padding(.horizontal, 4)
+    }
+
+    private func setAutomaticUpdates(enabled: Bool) {
+        if enabled {
+            controller.resumeAutomaticUpdates()
+        } else {
+            controller.pauseAutomaticUpdates()
+        }
+    }
+}
+
+private struct DashboardCard<Content: View>: View {
+    @ViewBuilder let content: () -> Content
+
+    var body: some View {
+        content()
+            .padding(20)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .strokeBorder(Color.primary.opacity(0.06), lineWidth: 1)
+            }
     }
 }
 
@@ -282,12 +491,23 @@ struct MenuBarUsageView: View {
                 Label("Usage unavailable", systemImage: "exclamationmark.triangle")
             }
 
+            if controller.updatesPaused {
+                Label("Updates paused", systemImage: "pause.circle")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+            } else if case .stale = controller.state {
+                Label("Last successful data", systemImage: "clock.badge.exclamationmark")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+            }
+
             Divider()
 
             HStack {
                 Button("Open Dashboard") {
-                    openWindow(id: "dashboard")
-                    NSApplication.shared.activate()
+                    DashboardWindowLifecycle.shared.showDashboard {
+                        openWindow(id: "dashboard")
+                    }
                 }
                 Button("Refresh Now") {
                     controller.refreshNow()
@@ -296,7 +516,7 @@ struct MenuBarUsageView: View {
             }
 
             HStack {
-                Button(controller.updatesPaused ? "Resume Updating" : "Stop Updating") {
+                Button(controller.updatesPaused ? "Resume Updating" : "Pause Updating") {
                     if controller.updatesPaused {
                         controller.resumeAutomaticUpdates()
                     } else {
@@ -311,6 +531,7 @@ struct MenuBarUsageView: View {
         }
         .padding()
         .frame(width: 280)
+        .onAppear { controller.refreshWhenActive() }
     }
 }
 

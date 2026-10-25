@@ -408,6 +408,16 @@ public enum WidgetStaleRecoveryKind: Equatable, Sendable {
 }
 
 public enum WidgetReloadPolicy {
+    /// Fetch timestamps alone are not a reason to spend WidgetKit's reload
+    /// budget on every background poll. Status, usage, and reset changes are.
+    public static func contentStateChanged(
+        previous: SnapshotStoreLoadResult,
+        current: SnapshotStoreLoadResult,
+        at date: Date
+    ) -> Bool {
+        contentSignature(for: previous, at: date) != contentSignature(for: current, at: date)
+    }
+
     /// Compares what the Widget can actually read before and after a
     /// publication attempt. This is intentionally based on store results,
     /// rather than whether `save` threw: a failed primary write may still
@@ -459,6 +469,28 @@ public enum WidgetReloadPolicy {
         case failed(String)
     }
 
+    private enum ContentSignature: Equatable {
+        case loading
+        case available([UsageWindow])
+        case stale([UsageWindow], recovery: WidgetStaleRecoveryKind)
+        case unauthenticated(String)
+        case failed(String)
+    }
+
+    private static func contentSignature(
+        for result: SnapshotStoreLoadResult,
+        at date: Date
+    ) -> ContentSignature {
+        switch WidgetSnapshotPolicy.state(from: result, at: date) {
+        case .loading: .loading
+        case .available(let snapshot): .available(snapshot.windows)
+        case .stale(let snapshot, let message):
+            .stale(snapshot.windows, recovery: WidgetStaleRecoveryKind(message: message))
+        case .unauthenticated(let message): .unauthenticated(message)
+        case .failed(let message): .failed(message)
+        }
+    }
+
     private static func visibleSignature(
         for result: SnapshotStoreLoadResult,
         at date: Date
@@ -475,6 +507,40 @@ public enum WidgetReloadPolicy {
         case .failed(let message):
             .failed(message)
         }
+    }
+}
+
+/// Keeps frequent account reads separate from requests to redraw the Widget.
+/// Only a request actually sent advances the baseline and freshness clock.
+public struct WidgetReloadGate: Sendable {
+    private var lastRequestedResult: SnapshotStoreLoadResult?
+    private var lastRequestedAt: Date?
+    private let freshnessInterval: TimeInterval
+
+    public init(freshnessInterval: TimeInterval = 15 * 60) {
+        self.freshnessInterval = freshnessInterval
+    }
+
+    public mutating func shouldRequestReload(
+        previous: SnapshotStoreLoadResult,
+        current: SnapshotStoreLoadResult,
+        at date: Date,
+        force: Bool = false
+    ) -> Bool {
+        let baseline = lastRequestedResult ?? previous
+        let freshnessDue = lastRequestedAt.map {
+            date < $0 || date.timeIntervalSince($0) >= freshnessInterval
+        } ?? true
+        let contentChanged = WidgetReloadPolicy.contentStateChanged(
+            previous: baseline, current: current, at: date
+        )
+        let freshnessChanged = freshnessDue && WidgetReloadPolicy.visibleStateChanged(
+            previous: baseline, current: current, at: date
+        )
+        guard force || contentChanged || freshnessChanged else { return false }
+        lastRequestedResult = current
+        lastRequestedAt = date
+        return true
     }
 }
 

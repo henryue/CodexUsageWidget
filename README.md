@@ -18,24 +18,26 @@ A privacy-minded native macOS app and WidgetKit extension that show your remaini
 ## Features
 
 - Native Small and Medium macOS desktop widgets using the glanceable **A · Clarity** design.
-- Shows the seven-day Codex limit and automatically supports a five-hour window if Codex exposes one again.
+- Shows five-hour and seven-day Codex usage windows when the account exposes them.
 - Handles single-window, dual-window, unknown-duration, stale, paused, signed-out, and error states without inventing data.
 - Supports Default, Dark, and Mono/tinted icon appearances created with Apple Icon Composer.
+- A native dashboard with a focused usage summary, system toolbar, background settings, and expandable connection details.
+- Closing the dashboard keeps updates running in the menu bar and hides the Dock icon. Reopen it from the menu-bar icon; choose Quit to stop the app.
 - Refresh, pause/resume, safe Codex re-detection, optional Launch at Login, and sanitized diagnostics.
 - No telemetry, web scraping, API-key billing integration, or direct credential-file access.
 
-WidgetKit schedules refreshes, so this is glanceable usage information rather than a second-by-second meter. Every snapshot includes an updated or stale state.
+While running, the host checks account limits about every 30 seconds and also responds to rate-limit notifications. Opening the dashboard or menu, waking the Mac, or restoring the network checks again if the last successful reading is at least 30 seconds old, and requests a Widget update. A newer cached reading can be sent to the Widget immediately. Clicking the Widget opens the dashboard and explicitly refreshes. Temporary connection failures retry quickly at first, then about every 5 minutes after repeated failures; a successful reconnect restores regular polling. Changed usage, reset times, and status request a Widget update immediately; timestamp-only changes are combined into a 15-minute freshness update to conserve WidgetKit's reload budget. The dashboard's **Refresh** button and the menu's **Refresh Now** button explicitly request a Widget update. WidgetKit can defer or throttle redraws, so the desktop widget is not guaranteed to update every minute or second. Every snapshot includes an updated or stale state.
 
 ## Requirements
 
 - macOS 14 or later.
-- Xcode 26 or later with a Swift 6 toolchain. The current project was validated with Xcode 26.6.
+- Xcode 26 or later with a Swift 6 toolchain. The current project was validated with Xcode 27.1.
 - An Apple ID/team available to Xcode for local code signing. The host app and Widget extension must use the same Team.
 - A current Codex-capable ChatGPT desktop app or Codex CLI installation, signed in to an account that exposes Codex usage limits.
 
 A free Personal Team may be usable for local testing, but Apple can require periodic re-signing and this project has not validated that as a long-term installation path. A downloadable build for arbitrary users instead requires the maintainer's paid Developer ID signing and notarization; end users would not need Xcode for that future release.
 
-The resolver checks the Codex app bundle, the Codex binary bundled with `/Applications/ChatGPT.app`, Homebrew locations, and `PATH`. Developers may also provide an absolute path through `CODEX_USAGE_CODEX_PATH`.
+The resolver checks the registered Codex/ChatGPT app, `ChatGPT.app` and `Codex.app` in system and user Applications folders, Homebrew locations, and `PATH`. Both the current `Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex` layout and the older `Contents/Resources/codex` layout are supported. Developers may also provide an absolute path through `CODEX_USAGE_CODEX_PATH`.
 
 ## Install from source
 
@@ -64,7 +66,7 @@ The same value is present in both targets. Apple documents that this macOS form 
 
 ### Add the widget
 
-1. Launch **Codex Usage** and choose **Refresh Now**.
+1. Launch **Codex Usage** and choose **Refresh** in the dashboard toolbar.
 2. Confirm that the app shows a current snapshot.
 3. Right-click the desktop, choose **Edit Widgets**, search for **Codex Usage**, and add the Small or Medium widget.
 4. Enable **Launch at Login** only if you want the host app to keep the snapshot refreshed after login.
@@ -74,7 +76,7 @@ The same value is present in both targets. Apple documents that this macOS form 
 - **Shared usage storage is unavailable:** confirm that both targets use the same signing Team, clean the build folder, and rebuild both targets.
 - **Codex was not found:** install or update ChatGPT/Codex, sign in, then choose **Re-detect Codex**.
 - **The widget is missing:** move the signed app to Applications, launch it once, and reopen the widget gallery.
-- **The data is out of date:** open the host app and choose **Refresh Now**; WidgetKit may delay the desktop redraw.
+- **The data is out of date:** open the host app and choose **Refresh**, or choose **Refresh Now** in its menu-bar panel; WidgetKit may delay the desktop redraw.
 
 ## Privacy and security model
 

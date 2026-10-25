@@ -5,6 +5,76 @@ import XCTest
 #endif
 
 final class UsageModelsTests: XCTestCase {
+    func testFrequentUnchangedPollsDoNotPostponeWidgetFreshnessReload() {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let windows = [UsageWindow(usedPercent: 20, durationMinutes: 10_080, resetsAt: now.addingTimeInterval(86_400))]
+        func sample(_ minute: Int) -> SnapshotStoreLoadResult {
+            let date = now.addingTimeInterval(Double(minute * 60))
+            return .loaded(SharedUsageEnvelope(
+                snapshot: UsageSnapshot(fetchedAt: date, windows: windows),
+                serviceStatus: .available, lastAttemptAt: date
+            ))
+        }
+        var gate = WidgetReloadGate()
+        XCTAssertTrue(gate.shouldRequestReload(previous: .missing, current: sample(0), at: now))
+        for minute in 1..<15 {
+            XCTAssertFalse(gate.shouldRequestReload(
+                previous: sample(minute - 1), current: sample(minute),
+                at: now.addingTimeInterval(Double(minute * 60))
+            ), "An unchanged minute sample must not request a Widget reload")
+        }
+        XCTAssertTrue(gate.shouldRequestReload(
+            previous: sample(14), current: sample(15), at: now.addingTimeInterval(900)
+        ), "Skipped polls must not move the freshness deadline")
+        XCTAssertFalse(gate.shouldRequestReload(
+            previous: sample(15), current: sample(15), at: now.addingTimeInterval(900)
+        ), "The broker event and returned snapshot must not produce two reloads")
+    }
+
+    func testUsageAndResetChangesAndExplicitRefreshBypassFreshnessDelay() {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        func sample(_ seconds: Double, used: Double = 20, reset: Double = 86_400) -> SnapshotStoreLoadResult {
+            let date = now.addingTimeInterval(seconds)
+            return .loaded(SharedUsageEnvelope(
+                snapshot: UsageSnapshot(fetchedAt: date, windows: [
+                    UsageWindow(usedPercent: used, durationMinutes: 10_080, resetsAt: now.addingTimeInterval(reset))
+                ]), serviceStatus: .available, lastAttemptAt: date
+            ))
+        }
+        var gate = WidgetReloadGate()
+        XCTAssertTrue(gate.shouldRequestReload(previous: .missing, current: sample(0), at: now))
+        XCTAssertFalse(gate.shouldRequestReload(previous: sample(0), current: sample(60), at: now.addingTimeInterval(60)))
+        XCTAssertTrue(gate.shouldRequestReload(previous: sample(60), current: sample(120, used: 21), at: now.addingTimeInterval(120)))
+        XCTAssertTrue(gate.shouldRequestReload(previous: sample(120, used: 21), current: sample(180, used: 21, reset: 172_800), at: now.addingTimeInterval(180)))
+        let unchanged = sample(240, used: 21, reset: 172_800)
+        XCTAssertTrue(gate.shouldRequestReload(previous: unchanged, current: unchanged, at: now.addingTimeInterval(240), force: true))
+        XCTAssertFalse(gate.shouldRequestReload(previous: unchanged, current: unchanged, at: now.addingTimeInterval(240)))
+    }
+
+    func testWidgetReloadGatePreservesFailurePauseAndRecoveryTransitions() {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let snapshot = UsageSnapshot.previewSevenDay(now: now)
+        func state(_ status: SharedServiceStatus, message: String? = nil, snapshot value: UsageSnapshot? = nil) -> SnapshotStoreLoadResult {
+            .loaded(SharedUsageEnvelope(snapshot: value ?? snapshot, serviceStatus: status, lastAttemptAt: now, message: message))
+        }
+        let ready = state(.available)
+        let failed = state(.failed, message: "Read timed out.")
+        let sameFailure = state(.failed, message: "A different hidden error.")
+        let paused = state(.failed, message: AutomaticUpdatesPersistencePolicy.pausedMessage)
+        let signedOut = state(.unauthenticated, message: "Sign in required.")
+        var gate = WidgetReloadGate()
+        XCTAssertTrue(gate.shouldRequestReload(previous: .missing, current: ready, at: now))
+        XCTAssertTrue(gate.shouldRequestReload(previous: ready, current: failed, at: now.addingTimeInterval(1)))
+        XCTAssertFalse(gate.shouldRequestReload(previous: failed, current: sameFailure, at: now.addingTimeInterval(2)))
+        XCTAssertTrue(gate.shouldRequestReload(previous: sameFailure, current: paused, at: now.addingTimeInterval(3)))
+        XCTAssertTrue(gate.shouldRequestReload(previous: paused, current: signedOut, at: now.addingTimeInterval(4)))
+        XCTAssertTrue(gate.shouldRequestReload(previous: signedOut, current: ready, at: now.addingTimeInterval(5)))
+
+        let later = now.addingTimeInterval(31 * 60)
+        let fresh = state(.available, snapshot: UsageSnapshot(fetchedAt: later, windows: snapshot.windows))
+        XCTAssertTrue(gate.shouldRequestReload(previous: ready, current: fresh, at: later), "Recovery from an aged snapshot must reach the Widget")
+    }
+
     func testDurationClassificationUsesValuesNotOrdering() {
         XCTAssertEqual(UsageWindowKind.classify(durationMinutes: 300), .fiveHour)
         XCTAssertEqual(UsageWindowKind.classify(durationMinutes: 10_080), .sevenDay)

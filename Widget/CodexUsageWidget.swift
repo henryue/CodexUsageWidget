@@ -1,5 +1,6 @@
 import SwiftUI
 import WidgetKit
+import OSLog
 
 struct CodexUsageEntry: TimelineEntry, Sendable {
     let date: Date
@@ -9,6 +10,7 @@ struct CodexUsageEntry: TimelineEntry, Sendable {
 
 struct CodexUsageProvider: TimelineProvider {
     private let store = AppGroupSnapshotStore()
+    private static let logger = Logger(subsystem: "com.henryyue.CodexUsage", category: "widget")
 
     func placeholder(in context: Context) -> CodexUsageEntry {
         let now = Date.now
@@ -35,6 +37,12 @@ struct CodexUsageProvider: TimelineProvider {
     func getTimeline(in context: Context, completion: @escaping (Timeline<CodexUsageEntry>) -> Void) {
         let now = Date.now
         let capturedLoadResult = store.loadResult()
+        if case .loaded(let envelope) = capturedLoadResult, let snapshot = envelope.snapshot {
+            let age = max(0, now.timeIntervalSince(snapshot.fetchedAt)).rounded()
+            Self.logger.info("Widget loaded shared snapshot; age in seconds: \(age)")
+        } else {
+            Self.logger.info("Widget has no readable shared snapshot")
+        }
         let timeline = WidgetSnapshotPolicy.timeline(from: capturedLoadResult, now: now)
         let entries = timeline.entries.map {
             CodexUsageEntry(date: $0.date, state: $0.state, isPlaceholder: false)

@@ -295,16 +295,20 @@ public actor CodexAppServerBroker {
         public var reconciliationInterval: Duration
         public var retryDelays: [Duration]
         public var maximumAutomaticFailures: Int
+        public var slowRecoveryInterval: Duration
 
         public init(
             initializeTimeout: Duration = .seconds(5),
             readTimeout: Duration = .seconds(10),
             notificationDebounce: Duration = .milliseconds(500),
-            reconciliationInterval: Duration = .seconds(15 * 60),
+            // A separate desktop session may consume quota without notifying
+            // this connection, so reconcile even while the dashboard is closed.
+            reconciliationInterval: Duration = .seconds(30),
             retryDelays: [Duration] = [
                 .seconds(1), .seconds(2), .seconds(4), .seconds(8), .seconds(30)
             ],
-            maximumAutomaticFailures: Int = 10
+            maximumAutomaticFailures: Int = 10,
+            slowRecoveryInterval: Duration = .seconds(5 * 60)
         ) {
             self.initializeTimeout = initializeTimeout
             self.readTimeout = readTimeout
@@ -312,6 +316,7 @@ public actor CodexAppServerBroker {
             self.reconciliationInterval = reconciliationInterval
             self.retryDelays = retryDelays
             self.maximumAutomaticFailures = maximumAutomaticFailures
+            self.slowRecoveryInterval = slowRecoveryInterval
         }
     }
 
@@ -909,6 +914,9 @@ public actor CodexAppServerBroker {
                 throw CancellationError()
             }
             lifecycle = .ready
+            // A deferred transport cleanup cancels the old timer while it
+            // drains ownership. Every successful reconnect restores polling.
+            if automaticUpdatesEnabled { ensureReconciliationLoop() }
             scheduleVersionInspectionIfNeeded(for: startedTransport.executableURL)
         } catch is CancellationError {
             await failSession(
@@ -1236,6 +1244,20 @@ public actor CodexAppServerBroker {
         }
 
         guard consecutiveFailures < configuration.maximumAutomaticFailures else {
+            // Stop rapid retries after a sustained outage, but keep checking
+            // transient failures at a low rate so background updates recover
+            // without requiring the user to reopen the dashboard.
+            switch error {
+            case .launchFailed, .initializeTimedOut, .readTimedOut, .connectionClosed:
+                let delay = jitter(configuration.slowRecoveryInterval)
+                lifecycle = .backingOff
+                emit(.connectionUnavailable(error, retryIn: delay))
+                scheduleBackoff(delay: delay)
+                return
+            case .protocolError, .executableNotFound, .executableRejected,
+                 .unauthenticated, .automaticRetriesStopped:
+                break
+            }
             lifecycle = .terminal
             emit(.automaticRetriesStopped)
             return
@@ -1708,28 +1730,47 @@ struct CodexExecutableResolver: CodexExecutableResolving, Sendable {
         let environment = ProcessInfo.processInfo.environment
         var paths: [String] = []
 
-        if let applicationURL = await MainActor.run(body: {
-            NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.openai.codex")
-        }) {
-            paths.append(
-                applicationURL
-                    .appendingPathComponent("Contents/Resources/codex", isDirectory: false)
-                    .path
-            )
+        let applicationURLs = await MainActor.run {
+            ["com.openai.codex", "com.openai.chat"].compactMap {
+                NSWorkspace.shared.urlForApplication(withBundleIdentifier: $0)
+            }
+        }
+        for applicationURL in applicationURLs {
+            paths.append(contentsOf: Self.applicationExecutablePaths(at: applicationURL))
         }
 
         if let override = environment["CODEX_USAGE_CODEX_PATH"], !override.isEmpty {
             paths.append(override)
         }
-        paths.append(contentsOf: [
-            "/Applications/ChatGPT.app/Contents/Resources/codex",
-            "/opt/homebrew/bin/codex",
-            "/usr/local/bin/codex"
-        ])
+        let applicationDirectories = [
+            URL(fileURLWithPath: "/Applications", isDirectory: true),
+            FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Applications", isDirectory: true)
+        ]
+        for directory in applicationDirectories {
+            for name in ["ChatGPT.app", "Codex.app"] {
+                paths.append(contentsOf: Self.applicationExecutablePaths(
+                    at: directory.appendingPathComponent(name, isDirectory: true)
+                ))
+            }
+        }
+        paths.append(contentsOf: ["/opt/homebrew/bin/codex", "/usr/local/bin/codex"])
         if let path = environment["PATH"] {
             paths.append(contentsOf: path.split(separator: ":").map { "\($0)/codex" })
         }
 
+        return Self.resolveCandidates(paths)
+    }
+
+    static func applicationExecutablePaths(at applicationURL: URL) -> [String] {
+        // Current desktop releases embed the native CLI in its own app bundle.
+        // Use the binary directly rather than the adjacent bin/codex shell shim.
+        [
+            "Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex",
+            "Contents/Resources/codex"
+        ].map { applicationURL.appendingPathComponent($0, isDirectory: false).path }
+    }
+
+    static func resolveCandidates(_ paths: [String]) -> Result<URL, CodexAppServerError> {
         var sawExistingRejectedCandidate = false
         for path in paths {
             if let validated = Self.validatedExecutable(path: path) {

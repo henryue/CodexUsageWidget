@@ -18,24 +18,26 @@
 ## 主要功能
 
 - 使用已经确认的 **A · Clarity** 设计，提供 Small 和 Medium 两种 macOS 桌面小组件。
-- 显示七天用量窗口；如果 Codex 以后重新提供五小时窗口，也会自动显示。
+- 当账号提供相应额度时，显示五小时和七天 Codex 用量窗口。
 - 正确处理单窗口、双窗口、未知时长、过期、暂停、未登录和错误状态，不会编造数据。
 - 应用图标支持 Default、Dark 和 Mono/tinted 外观，并使用 Apple Icon Composer 制作。
+- 主窗口使用清晰的用量摘要、原生工具栏、后台设置和可展开的连接详情。
+- 关闭主窗口后继续在菜单栏运行，并从 Dock 隐藏；点击菜单栏图标可以重新打开窗口，选择 Quit 才会退出程序。
 - 提供立即刷新、暂停/恢复、安全重新检测 Codex、可选的登录时启动以及脱敏诊断功能。
 - 不包含遥测、网页抓取、API Key 账单集成，也不会直接读取凭据文件。
 
-小组件的刷新时机由 WidgetKit 调度，因此它适合快速查看，而不是逐秒实时计量。每份快照都会明确显示更新时间或过期状态。
+主应用运行时约每 30 秒读取一次用量，同时继续响应额度变化通知。打开主窗口或菜单栏弹层、唤醒 Mac、网络恢复时，如果上次成功读取已超过 30 秒，也会再次检查，并主动请求同步 Widget；如果数据刚读取过，则直接请求 Widget 使用最新缓存。点击 Widget 打开主窗口也会立即读取并请求刷新。短暂断网等故障先快速重试，连续失败后改为约每 5 分钟自动重连；重新连上后恢复正常采样。用量、重置时间或状态发生变化时立即请求更新 Widget；只有读取时间变化时，合并为约 15 分钟一次的更新时间更新，减少消耗 WidgetKit 刷新预算。主窗口的 **Refresh** 和菜单栏弹层的 **Refresh Now** 都会明确请求更新 Widget。桌面重绘仍可能被 macOS 延迟或限流，因此不能保证 Widget 每分钟或逐秒更新。每份快照都会明确显示更新时间或过期状态。
 
 ## 系统要求
 
 - macOS 14 或更高版本。
-- Xcode 26 或更高版本，并包含 Swift 6 工具链；当前项目已使用 Xcode 26.6 验证。
+- Xcode 26 或更高版本，并包含 Swift 6 工具链；当前项目已使用 Xcode 27.1 验证。
 - Xcode 中可用于本地代码签名的 Apple ID/Team；主应用和 Widget 扩展必须选择同一个 Team。
 - 当前版本的 ChatGPT 桌面应用或 Codex CLI，并且已经登录到能够提供 Codex 用量限制的账号。
 
 免费的 Personal Team 可能可以用于本机测试，但 Apple 可能要求定期重新签名；本项目尚未把它验证为长期安装方案。如果未来提供普通用户可直接下载的版本，则需要维护者使用付费 Developer ID 完成签名和公证，最终用户不需要安装 Xcode。
 
-应用会依次检查 Codex 应用包、`/Applications/ChatGPT.app` 内置的 Codex、Homebrew 常见位置以及 `PATH`。开发者也可以通过 `CODEX_USAGE_CODEX_PATH` 指定 Codex 的绝对路径。
+应用会依次检查系统登记的 Codex/ChatGPT 应用、系统和用户 Applications 文件夹中的 `ChatGPT.app` 与 `Codex.app`、Homebrew 常见位置以及 `PATH`。同时支持当前的 `Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex` 和旧版 `Contents/Resources/codex` 目录结构。开发者也可以通过 `CODEX_USAGE_CODEX_PATH` 指定 Codex 的绝对路径。
 
 ## 从源代码安装
 
@@ -64,7 +66,7 @@ $(TeamIdentifierPrefix)com.henryyue.CodexUsageWidget
 
 ### 添加桌面小组件
 
-1. 启动 **Codex Usage**，点击 **Refresh Now**。
+1. 启动 **Codex Usage**，点击主窗口工具栏中的 **Refresh**。
 2. 确认应用已经显示当前用量快照。
 3. 右键点击桌面，选择 **Edit Widgets**，搜索 **Codex Usage**，然后添加 Small 或 Medium 小组件。
 4. 只有在希望登录后继续自动刷新时，才需要启用 **Launch at Login**。
@@ -74,7 +76,7 @@ $(TeamIdentifierPrefix)com.henryyue.CodexUsageWidget
 - **Shared usage storage is unavailable：** 确认两个 target 选择了同一个签名 Team，然后清理构建文件并重新构建。
 - **Codex was not found：** 安装或更新 ChatGPT/Codex、确认已经登录，然后点击 **Re-detect Codex**。
 - **组件列表中找不到：** 把已签名的应用移动到 Applications，启动一次，再重新打开组件列表。
-- **数据显示过期：** 打开主应用并点击 **Refresh Now**；WidgetKit 可能会延迟桌面重绘。
+- **数据显示过期：** 打开主应用并点击 **Refresh**，或在菜单栏弹层点击 **Refresh Now**；WidgetKit 可能会延迟桌面重绘。
 
 ## 隐私与安全设计
 
