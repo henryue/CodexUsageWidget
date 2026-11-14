@@ -1,5 +1,40 @@
 # Source Validation Record
 
+## Maintenance validation — 2026-11-14
+
+This maintenance corrects a test synchronization race; production app and Widget
+code are unchanged. The initial Swift Package run reported one failure because
+the initialization-timeout test asserted transport cleanup immediately after the
+request failed. Timeout delivery and cleanup can complete in separate tasks.
+The test now triggers a controlled timeout after initialization starts and waits
+for natural cleanup before shutdown. It still requires exactly one stop and no
+active transports, including for malformed initialization responses.
+
+Environment: macOS 27.2 (26B123), Xcode 27.2 (27B52), Apple Swift 6.4.2,
+Apple Silicon. Final source and build inputs were verified against the isolated
+temporary build copy.
+
+Passed checks after the test repair:
+
+- Swift Package tests: 61 runtime tests and 83 core tests, 144 total, zero failures.
+- Xcode tests: 144 tests, zero failures.
+- Repaired initialization cleanup test: 10 consecutive focused runs passed.
+- Unsigned Release build: host and Widget contain `x86_64` and `arm64` slices.
+- Live app-server smoke: initialization/read, sanitized snapshot round-trip,
+  Small/Medium entry selection, and owned child-process cleanup passed.
+- Installed 1.0.1 (build 2) continued publishing available snapshots about every
+  32 seconds. The Widget read snapshots aged 0–1 seconds, and system logs
+  confirmed successful timeline reloads.
+- Strict installed-signature verification passed; only the permanent installed
+  Widget extension was registered. No app replacement or restart was needed.
+
+The [current app-server contract](https://learn.chatgpt.com/docs/app-server#6-rate-limits-chatgpt)
+still supports the implemented rate-limit read and update flow. No compatibility
+repair was indicated by the source review or live smoke check. This run did not
+force a network outage or sleep, measure desktop pixel redraw latency, or validate
+notarization and clean-machine installation. An outdated iOS simulator warning
+did not prevent the macOS build or tests from succeeding.
+
 ## Maintenance validation — 2026-10-25
 
 The source tree published with this record includes the previously installed

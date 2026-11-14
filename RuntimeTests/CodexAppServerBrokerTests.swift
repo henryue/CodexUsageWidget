@@ -1036,17 +1036,39 @@ final class CodexAppServerBrokerTests: XCTestCase {
         let timeoutScript = FakeScript()
         timeoutScript.ignoreInitialize = true
         let timeoutFactory = FakeTransportFactory(script: timeoutScript)
+        let timeoutSleeper = ControlledReconciliationSleeper(interval: .seconds(1))
         let timeoutBroker = makeBroker(
             factory: timeoutFactory,
-            initializeTimeout: .milliseconds(10)
+            initializeTimeout: .seconds(1),
+            sleeper: timeoutSleeper
         )
+        let timeoutRead = Task { try await timeoutBroker.fetchRateLimits() }
+        // Wait for initialize to be sent and both startup deadlines to be
+        // registered, so CPU scheduling cannot time out an unstarted factory.
+        let initializationStarted = await waitUntil(timeout: 2) {
+            timeoutScript.initializeCount == 1 && timeoutSleeper.pendingSleepCount == 2
+        }
+        guard initializationStarted, timeoutSleeper.releaseNext() else {
+            XCTFail("Initialize did not reach the controlled timeout")
+            timeoutRead.cancel()
+            await timeoutBroker.shutdown()
+            _ = await timeoutRead.result
+            return
+        }
         do {
-            _ = try await timeoutBroker.fetchRateLimits()
+            _ = try await timeoutRead.value
             XCTFail("Expected initialize timeout")
         } catch {
             XCTAssertEqual(error as? CodexAppServerError, .initializeTimedOut)
         }
+        // The deadline may report failure before its separately owned cleanup
+        // finishes. Observe natural cleanup before shutdown can perform it.
+        let timeoutTransportStopped = await waitUntil(timeout: 2) {
+            timeoutFactory.stopCount == 1 && timeoutFactory.activeCount == 0
+        }
+        XCTAssertTrue(timeoutTransportStopped)
         XCTAssertEqual(timeoutFactory.stopCount, 1)
+        XCTAssertEqual(timeoutFactory.activeCount, 0)
         await timeoutBroker.shutdown()
 
         let malformedScript = FakeScript()
@@ -1059,7 +1081,12 @@ final class CodexAppServerBrokerTests: XCTestCase {
         } catch {
             XCTAssertEqual(error as? CodexAppServerError, .protocolError)
         }
+        let malformedTransportStopped = await waitUntil(timeout: 2) {
+            malformedFactory.stopCount == 1 && malformedFactory.activeCount == 0
+        }
+        XCTAssertTrue(malformedTransportStopped)
         XCTAssertEqual(malformedFactory.stopCount, 1)
+        XCTAssertEqual(malformedFactory.activeCount, 0)
         await malformedBroker.shutdown()
     }
 
@@ -2128,9 +2155,9 @@ final class CodexAppServerBrokerTests: XCTestCase {
     }
 }
 
-/// Only reconciliation sleeps are manually advanced; RPC deadlines still use
-/// the real clock. This exercises the broker's production timer loop without
-/// waiting a minute or allowing timing-dependent extra polling in the tests.
+/// Sleeps matching the selected interval are manually advanced; other sleeps
+/// use the real clock. Tests can control polling, recovery, or startup deadlines
+/// without relying on wall-clock scheduling.
 private final class ControlledReconciliationSleeper: BrokerSleeper, @unchecked Sendable {
     private let lock = NSLock()
     private let interval: Duration
