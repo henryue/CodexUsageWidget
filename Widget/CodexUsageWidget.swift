@@ -82,6 +82,9 @@ private struct ClarityWidgetEntryView: View {
     let entry: CodexUsageEntry
 
     var body: some View {
+        // WidgetKit renders archived entries, so Date.now here would not keep
+        // an elapsed label moving. The shared timeline supplies minute-age
+        // entries and the five-minute expiry transition from one store read.
         ClarityWidgetPresentationView(
             state: entry.state,
             family: family,

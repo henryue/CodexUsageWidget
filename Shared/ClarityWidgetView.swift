@@ -71,9 +71,9 @@ public struct ClarityWidgetView: View {
                     detail: message
                 )
             case .available(let snapshot):
-                usageView(snapshot: snapshot, stale: false, staleMessage: nil)
+                usageView(snapshot: snapshot, serviceMessage: nil)
             case .stale(let snapshot, let message):
-                usageView(snapshot: snapshot, stale: true, staleMessage: message)
+                usageView(snapshot: snapshot, serviceMessage: message)
             }
         }
     }
@@ -81,10 +81,14 @@ public struct ClarityWidgetView: View {
     @ViewBuilder
     private func usageView(
         snapshot: UsageSnapshot,
-        stale: Bool,
-        staleMessage: String?
+        serviceMessage: String?
     ) -> some View {
-        let recoveryAction = stale ? StaleRecoveryAction(message: staleMessage) : nil
+        // A service interruption can accompany a recent successful sample.
+        // Both sizes use its actual age to decide whether it is out of date.
+        let stale = WidgetFreshnessPolicy.isOutOfDate(snapshot: snapshot, at: date)
+        let recoveryAction = serviceMessage != nil || stale
+            ? StaleRecoveryAction(message: serviceMessage)
+            : nil
         if family == .systemMedium {
             ClarityMediumView(
                 snapshot: snapshot,
@@ -92,6 +96,7 @@ public struct ClarityWidgetView: View {
                 stale: stale,
                 recoveryAction: recoveryAction
             )
+            .help(serviceMessage ?? "Opens the Codex Usage dashboard")
         } else {
             ClaritySmallView(
                 snapshot: snapshot,
@@ -99,24 +104,19 @@ public struct ClarityWidgetView: View {
                 stale: stale,
                 recoveryAction: recoveryAction
             )
+            .help(serviceMessage ?? "Opens the Codex Usage dashboard")
         }
     }
 }
 
-private enum StaleRecoveryAction {
-    case resume
-    case refresh
+private typealias StaleRecoveryAction = WidgetStaleRecoveryKind
 
-    init(message: String?) {
-        switch WidgetStaleRecoveryKind(message: message) {
-        case .resume: self = .resume
-        case .refresh: self = .refresh
-        }
-    }
-
+private extension WidgetStaleRecoveryKind {
     var fullVisibleLabel: LocalizedStringKey {
         switch self {
         case .resume: "Out of date · Open app to resume"
+        case .signIn: "Out of date · Sign in"
+        case .storage: "Out of date · Check storage"
         case .refresh: "Out of date · Open app to refresh"
         }
     }
@@ -124,14 +124,27 @@ private enum StaleRecoveryAction {
     var actionVisibleLabel: LocalizedStringKey {
         switch self {
         case .resume: "Open app to resume"
+        case .signIn: "Open app to sign in"
+        case .storage: "Open app to check storage"
         case .refresh: "Open app to refresh"
+        }
+    }
+
+    var recentStatusLabel: LocalizedStringKey? {
+        switch self {
+        case .resume: "Paused"
+        case .signIn: "Sign in"
+        case .storage: "Storage error"
+        case .refresh: nil
         }
     }
 
     var accessibilityInstruction: String {
         switch self {
-        case .resume: "Open the app to resume updates."
-        case .refresh: "Open the app to refresh usage."
+        case .resume: "Updates paused. Open the app to resume updates."
+        case .signIn: "Sign in required. Open the app to sign in."
+        case .storage: "Shared usage storage is unavailable. Open the app to check storage."
+        case .refresh: "Updates delayed. Open the app to refresh usage."
         }
     }
 }
@@ -593,9 +606,9 @@ private struct UpdatedRelativeText: View {
             }
             return localizedKey("Out of date · \(elapsedMinutes / 60)h ago")
         }
-        if elapsedMinutes < 1 { return "Updated now" }
-        if elapsedMinutes < 60 { return localizedKey("Updated \(elapsedMinutes)m ago") }
-        return localizedKey("Updated \(elapsedMinutes / 60)h ago")
+        if elapsedMinutes < 1 { return "Just now" }
+        if elapsedMinutes < 60 { return localizedKey("\(elapsedMinutes)m ago") }
+        return localizedKey("\(elapsedMinutes / 60)h ago")
     }
 
     private var compactLabel: LocalizedStringKey {
@@ -635,9 +648,25 @@ private struct UpdatedRelativeText: View {
                     fitCandidate("Stale · Open")
                 }
             } else {
-                ViewThatFits(in: .horizontal) {
-                    fitCandidate(label)
-                    fitCandidate(compactLabel)
+                if let status = recoveryAction?.recentStatusLabel {
+                    if compactWhenStale {
+                        VStack(alignment: .leading, spacing: 0) {
+                            fitCandidate(label)
+                            actionFitCandidate(status)
+                        }
+                    } else {
+                        HStack(spacing: 4) {
+                            fitCandidate(compactLabel)
+                            Text("·")
+                            fitCandidate(status)
+                        }
+                        .font(.footnote)
+                    }
+                } else {
+                    ViewThatFits(in: .horizontal) {
+                        fitCandidate(label)
+                        fitCandidate(compactLabel)
+                    }
                 }
             }
         }
@@ -804,9 +833,8 @@ private enum WidgetAccessibilityFormatter {
     ) -> String {
         let prefix = stale ? "Out of date. Last updated" : "Last updated"
         let interval = max(0, referenceDate.timeIntervalSince(fetchedAt))
-        let recoverySuffix = stale
-            ? " \(recoveryAction?.accessibilityInstruction ?? StaleRecoveryAction.refresh.accessibilityInstruction)"
-            : ""
+        let recovery = recoveryAction ?? (stale ? .refresh : nil)
+        let recoverySuffix = recovery.map { " \($0.accessibilityInstruction)" } ?? ""
         if interval < 60 {
             return "\(prefix) just now.\(recoverySuffix)"
         }

@@ -198,8 +198,8 @@ final class RateLimitsParserTests: XCTestCase {
         let fetchedAt = Date(timeIntervalSince1970: 2_000_000_000)
         let cases: [(Any, Date?, Bool)] = [
             (2_000_000_100, Date(timeIntervalSince1970: 2_000_000_100), false),
-            (2_000_000_000, fetchedAt, true),
-            (1_999_999_900, Date(timeIntervalSince1970: 1_999_999_900), true),
+            (2_000_000_000, fetchedAt, false),
+            (1_999_999_900, Date(timeIntervalSince1970: 1_999_999_900), false),
             (2_000_000_100_000, nil, false),
             (NSNull(), nil, false)
         ]

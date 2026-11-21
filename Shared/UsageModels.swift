@@ -127,6 +127,17 @@ public struct UsageWindow: Codable, Equatable, Identifiable, Sendable {
     }
 }
 
+/// The age of the last successful read controls the Widget's out-of-date label.
+/// Connection failures and reset deadlines never make a recent read older.
+public enum WidgetFreshnessPolicy {
+    public static let maximumAge: TimeInterval = 5 * 60
+    public static let reloadInterval: TimeInterval = 3 * 60
+
+    public static func isOutOfDate(snapshot: UsageSnapshot, at date: Date) -> Bool {
+        snapshot.isStale(at: date)
+    }
+}
+
 public struct UsageSnapshot: Codable, Equatable, Sendable {
     public let fetchedAt: Date
     public let windows: [UsageWindow]
@@ -175,7 +186,7 @@ public struct UsageSnapshot: Codable, Equatable, Sendable {
 
     public func widgetTimelinePlan(
         now: Date,
-        reconciliationInterval: TimeInterval = 15 * 60
+        reconciliationInterval: TimeInterval = WidgetFreshnessPolicy.reloadInterval
     ) -> WidgetTimelinePlan {
         let reconciliationDate = now.addingTimeInterval(reconciliationInterval)
         let earliestFutureReset = windows
@@ -183,10 +194,16 @@ public struct UsageSnapshot: Codable, Equatable, Sendable {
             .filter { $0 > now }
             .min()
         var dates = [now]
+        // Advance only the displayed age of this immutable sample. Once it is
+        // out of date the label is fixed; these entries imply no new reads.
+        for minute in 1...5 {
+            let date = fetchedAt.addingTimeInterval(TimeInterval(minute * 60))
+            if date > now { dates.append(date) }
+        }
         if let earliestFutureReset {
             dates.append(earliestFutureReset)
         }
-        let staleTransitionDate = fetchedAt.addingTimeInterval(30 * 60 + 1)
+        let staleTransitionDate = fetchedAt.addingTimeInterval(WidgetFreshnessPolicy.maximumAge + 1)
         if staleTransitionDate > now {
             dates.append(staleTransitionDate)
         }
@@ -196,11 +213,11 @@ public struct UsageSnapshot: Codable, Equatable, Sendable {
         return WidgetTimelinePlan(entryDates: dates, reloadAfter: reloadAfter)
     }
 
-    public func isStale(at date: Date, after interval: TimeInterval = 30 * 60) -> Bool {
-        date.timeIntervalSince(fetchedAt) > interval || windows.contains {
-            guard let resetsAt = $0.resetsAt else { return false }
-            return resetsAt <= date
-        }
+    public func isStale(
+        at date: Date,
+        after interval: TimeInterval = WidgetFreshnessPolicy.maximumAge
+    ) -> Bool {
+        date.timeIntervalSince(fetchedAt) > interval
     }
 
     private static func normalized(_ input: [UsageWindow]) -> [UsageWindow] {
@@ -318,6 +335,8 @@ public struct SharedUsageEnvelope: Codable, Equatable, Sendable {
 public enum UsageViewState: Equatable, Sendable {
     case loading
     case available(UsageSnapshot)
+    /// Retains a last successful sample during a service issue or age expiry.
+    /// Widget labels must separately use WidgetFreshnessPolicy.isOutOfDate.
     case stale(UsageSnapshot, message: String?)
     case unauthenticated(String)
     case failed(String)
@@ -327,7 +346,10 @@ public enum UsageViewState: Equatable, Sendable {
 
         if let snapshot = envelope.snapshot {
             if envelope.serviceStatus != .available || snapshot.isStale(at: date) {
-                return .stale(snapshot, message: envelope.message)
+                let message = envelope.message ?? (envelope.serviceStatus == .unauthenticated
+                    ? "Sign in to Codex in the ChatGPT app."
+                    : nil)
+                return .stale(snapshot, message: message)
             }
             return .available(snapshot)
         }
@@ -366,7 +388,7 @@ public enum WidgetSnapshotPolicy {
     public static func timeline(
         from loadResult: SnapshotStoreLoadResult,
         now: Date,
-        reconciliationInterval: TimeInterval = 15 * 60
+        reconciliationInterval: TimeInterval = WidgetFreshnessPolicy.reloadInterval
     ) -> WidgetStateTimeline {
         let plan: WidgetTimelinePlan
         if case .loaded(let envelope) = loadResult, let snapshot = envelope.snapshot {
@@ -398,12 +420,22 @@ public enum WidgetPreviewPolicy {
 
 public enum WidgetStaleRecoveryKind: Equatable, Sendable {
     case resume
+    case signIn
+    case storage
     case refresh
 
     public init(message: String?) {
-        self = message?.localizedCaseInsensitiveContains("paused") == true
-            ? .resume
-            : .refresh
+        let message = message?.lowercased() ?? ""
+        if message.contains("paused") {
+            self = .resume
+        } else if message.contains("sign in") || message.contains("unauthenticated") {
+            self = .signIn
+        } else if message.contains("shared usage") || message.contains("storage") ||
+                    message.contains("snapshot sharing") {
+            self = .storage
+        } else {
+            self = .refresh
+        }
     }
 }
 
@@ -517,7 +549,7 @@ public struct WidgetReloadGate: Sendable {
     private var lastRequestedAt: Date?
     private let freshnessInterval: TimeInterval
 
-    public init(freshnessInterval: TimeInterval = 15 * 60) {
+    public init(freshnessInterval: TimeInterval = WidgetFreshnessPolicy.reloadInterval) {
         self.freshnessInterval = freshnessInterval
     }
 

@@ -8,8 +8,8 @@ final class UsageModelsTests: XCTestCase {
     func testFrequentUnchangedPollsDoNotPostponeWidgetFreshnessReload() {
         let now = Date(timeIntervalSince1970: 1_800_000_000)
         let windows = [UsageWindow(usedPercent: 20, durationMinutes: 10_080, resetsAt: now.addingTimeInterval(86_400))]
-        func sample(_ minute: Int) -> SnapshotStoreLoadResult {
-            let date = now.addingTimeInterval(Double(minute * 60))
+        func sample(_ poll: Int) -> SnapshotStoreLoadResult {
+            let date = now.addingTimeInterval(Double(poll * 30))
             return .loaded(SharedUsageEnvelope(
                 snapshot: UsageSnapshot(fetchedAt: date, windows: windows),
                 serviceStatus: .available, lastAttemptAt: date
@@ -17,17 +17,17 @@ final class UsageModelsTests: XCTestCase {
         }
         var gate = WidgetReloadGate()
         XCTAssertTrue(gate.shouldRequestReload(previous: .missing, current: sample(0), at: now))
-        for minute in 1..<15 {
+        for poll in 1..<6 {
             XCTAssertFalse(gate.shouldRequestReload(
-                previous: sample(minute - 1), current: sample(minute),
-                at: now.addingTimeInterval(Double(minute * 60))
-            ), "An unchanged minute sample must not request a Widget reload")
+                previous: sample(poll - 1), current: sample(poll),
+                at: now.addingTimeInterval(Double(poll * 30))
+            ), "An unchanged 30-second sample must not request a Widget reload")
         }
         XCTAssertTrue(gate.shouldRequestReload(
-            previous: sample(14), current: sample(15), at: now.addingTimeInterval(900)
-        ), "Skipped polls must not move the freshness deadline")
+            previous: sample(5), current: sample(6), at: now.addingTimeInterval(180)
+        ), "Skipped polls must not postpone the three-minute freshness refresh")
         XCTAssertFalse(gate.shouldRequestReload(
-            previous: sample(15), current: sample(15), at: now.addingTimeInterval(900)
+            previous: sample(6), current: sample(6), at: now.addingTimeInterval(180)
         ), "The broker event and returned snapshot must not produce two reloads")
     }
 
@@ -73,6 +73,112 @@ final class UsageModelsTests: XCTestCase {
         let later = now.addingTimeInterval(31 * 60)
         let fresh = state(.available, snapshot: UsageSnapshot(fetchedAt: later, windows: snapshot.windows))
         XCTAssertTrue(gate.shouldRequestReload(previous: ready, current: fresh, at: later), "Recovery from an aged snapshot must reach the Widget")
+    }
+
+    func testFirstFailurePublishesLatestSuccessfulSampleAndRepeatedFailuresDoNotReload() {
+        let origin = Date(timeIntervalSince1970: 1_800_000_000)
+        let windows = [UsageWindow(usedPercent: 20, durationMinutes: 300, resetsAt: origin.addingTimeInterval(3_600))]
+        func sample(fetched: Double, attempted: Double, status: SharedServiceStatus) -> SnapshotStoreLoadResult {
+            .loaded(SharedUsageEnvelope(
+                snapshot: UsageSnapshot(fetchedAt: origin.addingTimeInterval(fetched), windows: windows),
+                serviceStatus: status,
+                lastAttemptAt: origin.addingTimeInterval(attempted),
+                message: status == .failed ? "Read timed out." : nil
+            ))
+        }
+        // Exercise failure synchronization before even a four-minute heartbeat
+        // is due: the Widget still holds t=0, but the shared sample is t=180.
+        var gate = WidgetReloadGate(freshnessInterval: 240)
+        let first = sample(fetched: 0, attempted: 0, status: .available)
+        let latest = sample(fetched: 180, attempted: 180, status: .available)
+        XCTAssertTrue(gate.shouldRequestReload(previous: .missing, current: first, at: origin))
+        XCTAssertFalse(gate.shouldRequestReload(previous: first, current: latest, at: origin.addingTimeInterval(180)))
+        let failed = sample(fetched: 180, attempted: 190, status: .failed)
+        XCTAssertTrue(gate.shouldRequestReload(previous: latest, current: failed, at: origin.addingTimeInterval(190)))
+
+        let timeline = WidgetSnapshotPolicy.timeline(from: failed, now: origin.addingTimeInterval(190))
+        let heldAt301 = timeline.entries.last { $0.date <= origin.addingTimeInterval(301) }!
+        guard case .stale(let retained, _) = heldAt301.state else {
+            return XCTFail("The service failure should retain the last successful sample")
+        }
+        XCTAssertEqual(retained.fetchedAt, origin.addingTimeInterval(180))
+        XCTAssertFalse(WidgetFreshnessPolicy.isOutOfDate(snapshot: retained, at: origin.addingTimeInterval(301)))
+        XCTAssertFalse(WidgetFreshnessPolicy.isOutOfDate(snapshot: retained, at: origin.addingTimeInterval(480)))
+        XCTAssertTrue(WidgetFreshnessPolicy.isOutOfDate(snapshot: retained, at: origin.addingTimeInterval(481)))
+
+        let repeated = sample(fetched: 180, attempted: 220, status: .failed)
+        XCTAssertFalse(gate.shouldRequestReload(previous: failed, current: repeated, at: origin.addingTimeInterval(220)))
+        let recovered = sample(fetched: 230, attempted: 230, status: .available)
+        XCTAssertTrue(gate.shouldRequestReload(previous: repeated, current: recovered, at: origin.addingTimeInterval(230)))
+    }
+
+    func testHealthyUnchangedPollingRefreshesTimelineBeforeHeldSampleExpires() {
+        let origin = Date(timeIntervalSince1970: 1_800_000_000)
+        let windows = [UsageWindow(usedPercent: 20, durationMinutes: 300, resetsAt: origin.addingTimeInterval(3_600))]
+        var gate = WidgetReloadGate()
+        var previous = SnapshotStoreLoadResult.missing
+        var deliveredSnapshot: UsageSnapshot?
+        var reloadSeconds: [Int] = []
+        for second in stride(from: 0, through: 600, by: 30) {
+            let date = origin.addingTimeInterval(Double(second))
+            let snapshot = UsageSnapshot(fetchedAt: date, windows: windows)
+            let current = SnapshotStoreLoadResult.loaded(SharedUsageEnvelope(
+                snapshot: snapshot, serviceStatus: .available, lastAttemptAt: date
+            ))
+            if gate.shouldRequestReload(previous: previous, current: current, at: date) {
+                deliveredSnapshot = snapshot
+                reloadSeconds.append(second)
+            }
+            XCTAssertFalse(WidgetFreshnessPolicy.isOutOfDate(snapshot: deliveredSnapshot!, at: date))
+            previous = current
+        }
+        XCTAssertEqual(reloadSeconds, [0, 180, 360, 540])
+    }
+
+    func testRecentFailuresPauseSignInAndStorageNeverShowOutOfDateEarly() {
+        let fetched = Date(timeIntervalSince1970: 1_800_000_000)
+        let snapshot = UsageSnapshot(fetchedAt: fetched, windows: [
+            UsageWindow(usedPercent: 25, durationMinutes: 300, resetsAt: fetched.addingTimeInterval(10))
+        ])
+        let cases: [(SharedServiceStatus, String?, WidgetStaleRecoveryKind)] = [
+            (.failed, "Codex took too long to respond. Try Refresh Now.", .refresh),
+            (.failed, AutomaticUpdatesPersistencePolicy.pausedMessage, .resume),
+            (.unauthenticated, nil, .signIn),
+            (.failed, "Shared usage could not be updated. Open the app to refresh.", .storage)
+        ]
+        for (status, message, action) in cases {
+            let envelope = SharedUsageEnvelope(snapshot: snapshot, serviceStatus: status,
+                                               lastAttemptAt: fetched.addingTimeInterval(300), message: message)
+            for seconds in [0.0, 10, 30, 299.999, 300] {
+                let date = fetched.addingTimeInterval(seconds)
+                guard case .stale(let retained, let explanation) = WidgetSnapshotPolicy.state(from: .loaded(envelope), at: date) else {
+                    XCTFail("Service state and its recovery action must remain available")
+                    continue
+                }
+                XCTAssertEqual(WidgetStaleRecoveryKind(message: explanation), action)
+                XCTAssertEqual(retained, snapshot)
+                XCTAssertFalse(WidgetFreshnessPolicy.isOutOfDate(snapshot: retained, at: date))
+            }
+            XCTAssertTrue(WidgetFreshnessPolicy.isOutOfDate(snapshot: snapshot, at: fetched.addingTimeInterval(300.001)))
+        }
+    }
+
+    func testDistinctRecoveryActionsReloadImmediatelyAndRepeatedStorageErrorsCoalesce() {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let snapshot = UsageSnapshot.previewSevenDay(now: now)
+        func failure(_ message: String) -> SnapshotStoreLoadResult {
+            .loaded(SharedUsageEnvelope(snapshot: snapshot, serviceStatus: .failed, lastAttemptAt: now, message: message))
+        }
+        let network = failure("Read timed out.")
+        let signIn = failure("Sign in to Codex, then refresh.")
+        let storage = failure("Shared usage storage is unavailable.")
+        let storageAgain = failure("Shared usage could not be updated. Open the app to refresh.")
+        var gate = WidgetReloadGate()
+        XCTAssertTrue(gate.shouldRequestReload(previous: .missing, current: network, at: now))
+        XCTAssertTrue(gate.shouldRequestReload(previous: network, current: signIn, at: now.addingTimeInterval(1)))
+        XCTAssertTrue(gate.shouldRequestReload(previous: signIn, current: storage, at: now.addingTimeInterval(2)))
+        XCTAssertFalse(gate.shouldRequestReload(previous: storage, current: storageAgain, at: now.addingTimeInterval(3)))
+        XCTAssertTrue(gate.shouldRequestReload(previous: storageAgain, current: network, at: now.addingTimeInterval(4)))
     }
 
     func testDurationClassificationUsesValuesNotOrdering() {
@@ -180,21 +286,25 @@ final class UsageModelsTests: XCTestCase {
         XCTAssertEqual(unknownOnly.limitingWindow?.detailLabel, "1-day")
     }
 
-    func testPastResetMakesSnapshotStaleEvenWhenRecentlyFetched() {
+    func testPastResetPreservesRecentSampleAndItsReportedRemainingValue() {
         let now = Date(timeIntervalSince1970: 1_000)
         let window = UsageWindow(usedPercent: 20, durationMinutes: 300, resetsAt: now.addingTimeInterval(-1))
         let snapshot = UsageSnapshot(fetchedAt: now.addingTimeInterval(-10), windows: [window])
-        XCTAssertTrue(snapshot.isStale(at: now))
+        XCTAssertFalse(WidgetFreshnessPolicy.isOutOfDate(snapshot: snapshot, at: now))
+        XCTAssertEqual(snapshot.windows.first?.remainingPercent, 80)
+        XCTAssertEqual(snapshot.windows.first?.resetsAt, window.resetsAt)
     }
 
-    func testThirtyMinuteFreshnessBoundary() {
+    func testFiveMinuteFreshnessBoundaryIsStrictForBothWidgetSizes() {
         let now = Date(timeIntervalSince1970: 10_000)
         let snapshot = UsageSnapshot(
-            fetchedAt: now.addingTimeInterval(-1_800),
+            fetchedAt: now.addingTimeInterval(-300),
             windows: [UsageWindow(usedPercent: 10, durationMinutes: 10_080, resetsAt: now.addingTimeInterval(500))]
         )
-        XCTAssertFalse(snapshot.isStale(at: now))
-        XCTAssertTrue(snapshot.isStale(at: now.addingTimeInterval(1)))
+        XCTAssertFalse(WidgetFreshnessPolicy.isOutOfDate(snapshot: snapshot, at: now.addingTimeInterval(-0.001)))
+        XCTAssertFalse(WidgetFreshnessPolicy.isOutOfDate(snapshot: snapshot, at: now))
+        XCTAssertTrue(WidgetFreshnessPolicy.isOutOfDate(snapshot: snapshot, at: now.addingTimeInterval(0.001)))
+        XCTAssertFalse(WidgetFreshnessPolicy.isOutOfDate(snapshot: snapshot, at: snapshot.fetchedAt.addingTimeInterval(-1)))
     }
 
     func testResetTimeFormatting() {
@@ -231,11 +341,11 @@ final class UsageModelsTests: XCTestCase {
         let plan = snapshot.widgetTimelinePlan(now: now)
         XCTAssertEqual(
             plan.entryDates,
-            [now, reset, now.addingTimeInterval(30 * 60 + 1)]
+            [now, reset] + [60, 120, 180, 240, 300, 301].map { now.addingTimeInterval(Double($0)) }
         )
         XCTAssertFalse(snapshot.isStale(at: reset.addingTimeInterval(-1)))
-        XCTAssertTrue(snapshot.isStale(at: reset))
-        XCTAssertTrue(snapshot.isStale(at: reset.addingTimeInterval(1)))
+        XCTAssertFalse(snapshot.isStale(at: reset))
+        XCTAssertFalse(snapshot.isStale(at: reset.addingTimeInterval(1)))
         XCTAssertEqual(plan.reloadAfter, reset.addingTimeInterval(1))
     }
 
@@ -261,17 +371,18 @@ final class UsageModelsTests: XCTestCase {
         let plan = snapshot.widgetTimelinePlan(now: now)
         XCTAssertEqual(
             plan.entryDates,
-            [now, now.addingTimeInterval(30 * 60 + 1), reset]
+            [now] + [60, 120, 180, 240, 300, 301].map { now.addingTimeInterval(Double($0)) } + [reset]
         )
-        XCTAssertEqual(plan.reloadAfter, now.addingTimeInterval(15 * 60))
-        XCTAssertTrue(snapshot.isStale(at: plan.entryDates[1]))
-        XCTAssertTrue(snapshot.isStale(at: plan.entryDates[2]))
+        XCTAssertEqual(plan.reloadAfter, now.addingTimeInterval(3 * 60))
+        XCTAssertFalse(snapshot.isStale(at: now.addingTimeInterval(300)))
+        XCTAssertTrue(snapshot.isStale(at: now.addingTimeInterval(301)))
+        XCTAssertTrue(snapshot.isStale(at: reset))
     }
 
     func testTimelinePreloadsAgeStaleTransitionIfWidgetKitReloadIsDelayed() {
         let now = Date(timeIntervalSince1970: 1_800_000_000)
         let reset = now.addingTimeInterval(2 * 3_600)
-        let staleTransition = now.addingTimeInterval(30 * 60 + 1)
+        let staleTransition = now.addingTimeInterval(301)
         let snapshot = UsageSnapshot(
             fetchedAt: now,
             windows: [UsageWindow(usedPercent: 20, durationMinutes: 10_080, resetsAt: reset)]
@@ -279,10 +390,26 @@ final class UsageModelsTests: XCTestCase {
 
         let plan = snapshot.widgetTimelinePlan(now: now)
 
-        XCTAssertEqual(plan.entryDates, [now, staleTransition, reset])
-        XCTAssertFalse(snapshot.isStale(at: now.addingTimeInterval(30 * 60)))
+        XCTAssertEqual(plan.entryDates, [now] + [60, 120, 180, 240, 300, 301].map { now.addingTimeInterval(Double($0)) } + [reset])
+        XCTAssertFalse(snapshot.isStale(at: now.addingTimeInterval(300)))
         XCTAssertTrue(snapshot.isStale(at: staleTransition))
         XCTAssertTrue(plan.entryDates.contains(reset), "reset transition must remain preloaded")
+    }
+
+    func testPartlyAgedTimelineUsesSuccessfulSampleMinuteBoundaries() {
+        let fetchedAt = Date(timeIntervalSince1970: 1_800_000_000)
+        let now = fetchedAt.addingTimeInterval(275)
+        let snapshot = UsageSnapshot(fetchedAt: fetchedAt, windows: [
+            UsageWindow(usedPercent: 20, durationMinutes: 300, resetsAt: nil)
+        ])
+        let timeline = WidgetSnapshotPolicy.timeline(from: .loaded(SharedUsageEnvelope(
+            snapshot: snapshot, serviceStatus: .available, lastAttemptAt: now
+        )), now: now)
+        XCTAssertEqual(timeline.entries.map(\.date), [now, fetchedAt.addingTimeInterval(300), fetchedAt.addingTimeInterval(301)])
+        XCTAssertEqual(timeline.entries[1].state, .available(snapshot))
+        XCTAssertEqual(timeline.entries[2].state, .stale(snapshot, message: nil))
+        XCTAssertFalse(WidgetFreshnessPolicy.isOutOfDate(snapshot: snapshot, at: timeline.entries[1].date))
+        XCTAssertTrue(WidgetFreshnessPolicy.isOutOfDate(snapshot: snapshot, at: timeline.entries[2].date))
     }
 
     func testGenericLabelsAndMoreThanTwoWindowSelection() {
@@ -369,13 +496,13 @@ final class UsageModelsTests: XCTestCase {
             lastAttemptAt: now.addingTimeInterval(3),
             message: "Codex took too long to respond. Try Refresh Now."
         )
-        XCTAssertFalse(
+        XCTAssertTrue(
             WidgetReloadPolicy.visibleStateChanged(
                 previous: .loaded(recoveredStale),
                 current: .loaded(differentHiddenRefreshMessage),
                 at: now.addingTimeInterval(3)
             ),
-            "Hidden refresh-error wording must not reload an otherwise identical Widget"
+            "Leaving a storage error must update its distinct recovery action"
         )
 
         let pausedRecovery = SharedUsageEnvelope(
@@ -438,13 +565,14 @@ final class UsageModelsTests: XCTestCase {
         )
     }
 
-    func testTwentyFourHourReconciliationBudgetIsAtMostNinetySix() {
+    func testProviderReconciliationCadencePrecedesFiveMinuteExpiry() {
+        XCTAssertLessThan(WidgetFreshnessPolicy.reloadInterval, WidgetFreshnessPolicy.maximumAge)
         XCTAssertEqual(
             WidgetReloadPolicy.scheduledReadUpperBound(
                 over: 24 * 60 * 60,
-                reconciliationInterval: 15 * 60
+                reconciliationInterval: WidgetFreshnessPolicy.reloadInterval
             ),
-            96
+            480
         )
     }
 
@@ -491,7 +619,7 @@ final class UsageModelsTests: XCTestCase {
 
         XCTAssertEqual(
             timeline.entries.map(\.date),
-            [now, now.addingTimeInterval(30 * 60 + 1), resetA]
+            [now] + [60, 120, 180, 240, 300, 301].map { now.addingTimeInterval(Double($0)) } + [resetA]
         )
         for entry in timeline.entries {
             switch entry.state {

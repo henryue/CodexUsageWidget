@@ -1,6 +1,13 @@
 import SwiftUI
 import WidgetKit
 
+private func snapshotAgeLabel(_ snapshot: UsageSnapshot, at date: Date) -> String {
+    let minutes = max(0, Int(date.timeIntervalSince(snapshot.fetchedAt) / 60))
+    if minutes < 1 { return "Just now" }
+    if minutes < 60 { return "\(minutes)m ago" }
+    return "\(minutes / 60)h ago"
+}
+
 struct DashboardView: View {
     @ObservedObject var controller: UsageController
 
@@ -149,78 +156,80 @@ struct DashboardView: View {
     }
 
     private func snapshotCard(_ snapshot: UsageSnapshot, stale: Bool, message: String?) -> some View {
-        DashboardCard {
-            VStack(alignment: .leading, spacing: 22) {
-                HStack {
-                    statusBadge(
-                        title: controller.updatesPaused ? "Paused" : (stale ? "Last successful data" : "Up to date"),
-                        symbol: controller.updatesPaused ? "pause.fill" : (stale ? "clock.badge.exclamationmark" : "checkmark.circle.fill"),
-                        color: controller.updatesPaused || stale ? .orange : .green
-                    )
-                    Spacer()
-                    HStack(spacing: 4) {
-                        Text("Updated")
-                        Text(snapshot.fetchedAt, style: .relative)
-                    }
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .help(snapshot.fetchedAt.formatted(date: .abbreviated, time: .shortened))
-                }
-
-                if let limiting = snapshot.limitingWindow {
-                    VStack(alignment: .leading, spacing: 16) {
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text("\(limiting.detailLabel) limit")
-                                .font(.subheadline)
+        TimelineView(.periodic(from: snapshot.fetchedAt.addingTimeInterval(1), by: 60)) { context in
+            let outOfDate = WidgetFreshnessPolicy.isOutOfDate(snapshot: snapshot, at: context.date)
+            DashboardCard {
+                VStack(alignment: .leading, spacing: 22) {
+                    HStack {
+                        statusBadge(
+                            title: controller.updatesPaused ? "Paused" : (outOfDate ? "Out of date" : snapshotAgeLabel(snapshot, at: context.date)),
+                            symbol: controller.updatesPaused ? "pause.fill" : (outOfDate ? "clock.badge.exclamationmark" : "clock"),
+                            color: controller.updatesPaused || outOfDate ? .orange : .secondary
+                        )
+                        Spacer()
+                        if controller.updatesPaused || outOfDate {
+                            Text(snapshotAgeLabel(snapshot, at: context.date))
+                                .font(.caption)
                                 .foregroundStyle(.secondary)
-                            HStack(alignment: .firstTextBaseline, spacing: 10) {
-                                Text("\(limiting.roundedRemainingPercent)%")
-                                    .font(.system(size: 64, weight: .semibold))
-                                    .tracking(-2)
-                                    .monospacedDigit()
-                                Text("remaining")
-                                    .font(.title3)
+                        }
+                    }
+                    .help(snapshot.fetchedAt.formatted(date: .abbreviated, time: .shortened))
+
+                    if let limiting = snapshot.limitingWindow {
+                        VStack(alignment: .leading, spacing: 16) {
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text("\(limiting.detailLabel) limit")
+                                    .font(.subheadline)
                                     .foregroundStyle(.secondary)
+                                HStack(alignment: .firstTextBaseline, spacing: 10) {
+                                    Text("\(limiting.roundedRemainingPercent)%")
+                                        .font(.system(size: 64, weight: .semibold))
+                                        .tracking(-2)
+                                        .monospacedDigit()
+                                    Text("remaining")
+                                        .font(.title3)
+                                        .foregroundStyle(.secondary)
+                                }
+                                .accessibilityElement(children: .combine)
                             }
-                            .accessibilityElement(children: .combine)
+
+                            ProgressView(value: limiting.remainingPercent, total: 100)
+                                .tint(.accentColor)
+                                .accessibilityLabel("\(limiting.detailLabel) usage remaining")
+                                .accessibilityValue("\(limiting.roundedRemainingPercent) percent")
+
+                            resetSummary(limiting, at: context.date)
                         }
 
-                        ProgressView(value: limiting.remainingPercent, total: 100)
-                            .tint(.accentColor)
-                            .accessibilityLabel("\(limiting.detailLabel) usage remaining")
-                            .accessibilityValue("\(limiting.roundedRemainingPercent) percent")
-
-                        resetSummary(limiting)
-                    }
-
-                    if snapshot.windows.count > 1 {
-                        Divider()
-                        VStack(spacing: 16) {
-                            ForEach(Array(snapshot.strictnessSortedWindows.dropFirst())) { window in
-                                additionalWindowRow(window)
+                        if snapshot.windows.count > 1 {
+                            Divider()
+                            VStack(spacing: 16) {
+                                ForEach(Array(snapshot.strictnessSortedWindows.dropFirst())) { window in
+                                    additionalWindowRow(window, at: context.date)
+                                }
                             }
                         }
-                    }
-                } else {
-                    Text("No usage limits are available in this snapshot.")
-                        .foregroundStyle(.secondary)
-                }
-
-                if stale, !controller.updatesPaused, let message {
-                    HStack(alignment: .top, spacing: 8) {
-                        Image(systemName: "exclamationmark.circle")
-                            .foregroundStyle(.orange)
-                        Text(message)
+                    } else {
+                        Text("No usage limits are available in this snapshot.")
                             .foregroundStyle(.secondary)
-                            .textSelection(.enabled)
                     }
-                    .font(.caption)
+
+                    if stale, !controller.updatesPaused, let message {
+                        HStack(alignment: .top, spacing: 8) {
+                            Image(systemName: "exclamationmark.circle")
+                                .foregroundStyle(.orange)
+                            Text(message)
+                                .foregroundStyle(.secondary)
+                                .textSelection(.enabled)
+                        }
+                        .font(.caption)
+                    }
                 }
             }
         }
     }
 
-    private func additionalWindowRow(_ window: UsageWindow) -> some View {
+    private func additionalWindowRow(_ window: UsageWindow, at date: Date) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .firstTextBaseline) {
                 Text("\(window.detailLabel) limit")
@@ -233,15 +242,15 @@ struct DashboardView: View {
             }
             ProgressView(value: window.remainingPercent, total: 100)
                 .tint(.accentColor)
-            resetSummary(window)
+            resetSummary(window, at: date)
         }
     }
 
-    private func resetSummary(_ window: UsageWindow) -> some View {
+    private func resetSummary(_ window: UsageWindow, at date: Date) -> some View {
         HStack(spacing: 6) {
             Image(systemName: "clock")
             if let resetsAt = window.resetsAt {
-                if resetsAt <= .now {
+                if resetsAt <= date {
                     Text("Reset time passed · Pending refresh")
                 } else {
                     Text("Resets in")
@@ -462,6 +471,21 @@ struct MenuBarUsageView: View {
     @Environment(\.openWindow) private var openWindow
 
     var body: some View {
+        TimelineView(.periodic(from: ageTimelineStart, by: 60)) { context in
+            content(at: context.date)
+        }
+    }
+
+    private var ageTimelineStart: Date {
+        switch controller.state {
+        case .available(let snapshot), .stale(let snapshot, _):
+            snapshot.fetchedAt.addingTimeInterval(1)
+        case .loading, .unauthenticated, .failed:
+            .now
+        }
+    }
+
+    private func content(at date: Date) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
                 Text("Codex Usage")
@@ -483,6 +507,14 @@ struct MenuBarUsageView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
+                if WidgetFreshnessPolicy.isOutOfDate(snapshot: snapshot, at: date) {
+                    Label("Out of date", systemImage: "clock.badge.exclamationmark")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                }
+                Text(snapshotAgeLabel(snapshot, at: date))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             case .loading:
                 Text("Loading usage…").foregroundStyle(.secondary)
             case .unauthenticated:
@@ -495,10 +527,11 @@ struct MenuBarUsageView: View {
                 Label("Updates paused", systemImage: "pause.circle")
                     .font(.caption)
                     .foregroundStyle(.orange)
-            } else if case .stale = controller.state {
-                Label("Last successful data", systemImage: "clock.badge.exclamationmark")
+            } else if case .stale(_, let message) = controller.state, let message {
+                Label(serviceStatusLabel(for: message), systemImage: "exclamationmark.circle")
                     .font(.caption)
                     .foregroundStyle(.orange)
+                    .help(message)
             }
 
             Divider()
@@ -532,6 +565,15 @@ struct MenuBarUsageView: View {
         .padding()
         .frame(width: 280)
         .onAppear { controller.refreshWhenActive() }
+    }
+
+    private func serviceStatusLabel(for message: String) -> String {
+        switch WidgetStaleRecoveryKind(message: message) {
+        case .resume: "Updates paused"
+        case .signIn: "Sign in required"
+        case .storage: "Shared storage unavailable"
+        case .refresh: "Refresh delayed"
+        }
     }
 }
 
