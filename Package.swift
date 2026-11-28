@@ -38,7 +38,7 @@ let package = Package(
                 "Info.plist",
                 "CodexUsage.entitlements"
             ],
-            sources: ["CodexAppServerClient.swift"]
+            sources: ["CodexAppServerClient.swift", "MenuBarUsageIcon.swift"]
         ),
         .testTarget(
             name: "CodexUsageRuntimeTests",

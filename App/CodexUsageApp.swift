@@ -1,10 +1,12 @@
 import AppKit
+import Combine
 import SwiftUI
 
 @main
 struct CodexUsageApp: App {
     @NSApplicationDelegateAdaptor(AppTerminationDelegate.self) private var appDelegate
     @StateObject private var controller = UsageController.shared
+    @StateObject private var menuBarClock = MenuBarSnapshotClock(states: UsageController.shared.$state)
 
     var body: some Scene {
         WindowGroup("Codex Usage", id: "dashboard") {
@@ -21,18 +23,9 @@ struct CodexUsageApp: App {
         MenuBarExtra {
             MenuBarUsageView(controller: controller)
         } label: {
-            Label("Codex Usage", systemImage: menuBarSymbol)
+            MenuBarUsageIcon(state: controller.state, at: menuBarClock.date)
         }
         .menuBarExtraStyle(.window)
-    }
-
-    private var menuBarSymbol: String {
-        switch controller.state {
-        case .available: "chart.bar.fill"
-        case .stale: "clock.badge.exclamationmark"
-        case .loading: "arrow.triangle.2.circlepath"
-        case .unauthenticated, .failed: "exclamationmark.triangle"
-        }
     }
 }
 
@@ -165,5 +158,45 @@ final class AppTerminationDelegate: NSObject, NSApplicationDelegate {
         case .terminateNow: return .terminateNow
         case .terminateLater: return .terminateLater
         }
+    }
+}
+
+/// Owns the status item's age transition even when all app windows are closed.
+@MainActor
+final class MenuBarSnapshotClock: ObservableObject {
+    @Published private(set) var date = Date.now
+    private var observation: AnyCancellable?
+    private var expiration: AnyCancellable?
+
+    init(states: Published<UsageViewState>.Publisher) {
+        let workspace = NSWorkspace.shared.notificationCenter
+        let timeChanges = workspace.publisher(for: NSWorkspace.didWakeNotification)
+            .merge(with: workspace.publisher(for: NSWorkspace.screensDidWakeNotification),
+                   NotificationCenter.default.publisher(for: .NSSystemClockDidChange))
+            .map { _ in () }
+            .prepend(())
+        observation = states.combineLatest(timeChanges)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] state, _ in self?.update(for: state) }
+    }
+
+    private func update(for state: UsageViewState) {
+        expiration = nil
+        let now = Date.now
+        date = now
+        let snapshot: UsageSnapshot
+        switch state {
+        case .available(let value), .stale(let value, _): snapshot = value
+        default: return
+        }
+        guard !snapshot.isStale(at: now) else { return }
+
+        // Exactly five minutes is still fresh. Fire just past the boundary.
+        let deadline = snapshot.fetchedAt.addingTimeInterval(WidgetFreshnessPolicy.maximumAge + 0.001)
+        let timer = Timer(fire: deadline, interval: 0, repeats: false) { [weak self] _ in
+            MainActor.assumeIsolated { self?.update(for: state) }
+        }
+        expiration = AnyCancellable { timer.invalidate() }
+        RunLoop.main.add(timer, forMode: .common)
     }
 }

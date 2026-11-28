@@ -22,6 +22,8 @@ A privacy-minded native macOS app and WidgetKit extension that show your remaini
 - Handles single-window, dual-window, unknown-duration, stale, paused, signed-out, and error states without inventing data.
 - Supports Default, Dark, and Mono/tinted icon appearances created with Apple Icon Composer.
 - A native dashboard with a focused usage summary, system toolbar, background settings, and expandable connection details.
+- The menu-bar circle shows the lowest remaining percentage across usage windows. The fill is green at 51–100%, yellow at 26–50%, orange at 11–25%, and red at 1–10%. A visible sliver remains down to 1%. At 0% the circle is hollow.
+- A clock with a red exclamation mark replaces the gauge when the last successful reading is more than five minutes old. Hover for the last measured percentage. A fresh reading restores the gauge.
 - Closing the dashboard keeps updates running in the menu bar and hides the Dock icon. Reopen it from the menu-bar icon; choose Quit to stop the app.
 - Refresh, pause/resume, safe Codex re-detection, optional Launch at Login, and sanitized diagnostics.
 - No telemetry, web scraping, API-key billing integration, or direct credential-file access.
